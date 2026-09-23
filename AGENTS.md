@@ -24,7 +24,7 @@ The plan lives in `docs/IMPLEMENTATION_PLAN.md`; the contract is `docs/API.md` a
   - `lib/server/` - NDJSON response helpers and the upstream proxy.
   - `components/console/` - the inference console UI.
   - `tests/unit/` (Vitest) and `tests/e2e/` (Playwright).
-- `backend/` - FastAPI + diffusers inference service. Not built yet (Track B).
+- `backend/` - FastAPI + diffusers inference service, deployed on Modal via `deploy/modal_app.py`. Not built yet (Track B).
 
 ## Commands
 

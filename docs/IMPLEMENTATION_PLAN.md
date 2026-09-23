@@ -15,6 +15,9 @@ Users type a prompt, the fine-tuned model generates a nuclear-domain image, and 
 > Next: Phase 4 (create the GitHub remote and deploy to Vercel), which needs Jeremy's go-ahead, then Track B.
 > Deviations from the original text are recorded inline as **As built** notes.
 
+> **GPU host (decided 2026-09-23): Modal.** Serverless, scale-to-zero, billed per second, and the Starter plan's $30/month of free compute should cover lab-demo traffic.
+> Section 5 records the decision and the alternatives considered; Sections 6, 8, 9, 10, and 11 carry the Modal-specific design.
+
 ---
 
 ## 1. Goals and non-goals
@@ -70,7 +73,7 @@ This has three consequences that shape everything below:
 3. **The model is on the Hugging Face Hub under Apache 2.0**, downloaded on demand.
    The base SDXL weights (~7 GB) plus the custom UNet download on first load, so container images and cold starts must account for that.
 
-A quick reproducibility step is worth doing before writing any app code: run the snippet above in a Colab or Kaggle GPU notebook, confirm the model loads and produces a sane nuclear-domain image, and record a few known-good prompts and parameter values.
+A quick reproducibility step is worth doing before writing any app code: run the snippet above on a GPU (`modal run`, or the AIMS cluster's 1-GPU, 5-hour free tier), confirm the model loads and produces a sane nuclear-domain image, and record a few known-good prompts and parameter values.
 Those become the app's defaults and the seed content for a prompt-gallery.
 
 ---
@@ -80,7 +83,7 @@ Those become the app's defaults and the seed content for a prompt-gallery.
 Three logical pieces, cleanly separated so each can be deployed and scaled independently:
 
 ```
-                                                              (GPU)
+                                                          (GPU, on Modal)
 +-------------------+     +---------------------+         +---------------------------+
 |   Next.js app     | --> |  Route handler      |  HTTPS  |   Inference service       |
 |   (App Router,    |     |  /api/generate      | ------> |   FastAPI + diffusers      |
@@ -132,7 +135,8 @@ All component libraries above are open source and installed by copying component
 - `diffusers`, `transformers`, `accelerate`, `torch` (CUDA build)
 - `Pillow` for image encoding
 - Pydantic models for request/response validation
-- Uvicorn server, containerized with a CUDA base image
+- Uvicorn for local runs; on Modal, the same FastAPI app is served through `@modal.asgi_app()` and the container image is defined in Python (`modal.Image`), so there is no Dockerfile to maintain
+- `modal` SDK for deployment (Section 5)
 
 **Why not do inference in Next.js / Node?**
 The model ecosystem is Python-only (`diffusers`), and the lab's ML code is already Python.
@@ -144,23 +148,34 @@ Next.js still earns its place: its `/api/generate` route handler is the server-s
 ## 5. Where the GPU lives (the key decision)
 
 The frontend is trivial to host. The real choice is how to serve GPU inference.
-Four viable options, roughly ordered from least to most operational overhead:
 
-| Option | How it works | Pros | Cons | Best when |
-| --- | --- | --- | --- | --- |
-| **Modal** (recommended) | Wrap the pipeline in a Modal function with a GPU decorator; Modal gives an autoscaling HTTPS endpoint, scale-to-zero | Python-native, minimal DevOps, pay-per-second, scales to zero when idle, easy to keep the model warm | Cold starts (~20-40s) unless you keep a container warm; another vendor | You want a real public deployment with low idle cost |
-| **Hugging Face Inference Endpoints** | Deploy the model on HF with a **custom `handler.py`** that composes base SDXL + the custom UNet | Model already lives on HF; managed autoscaling; natural fit | Needs a custom handler (the default SDXL handler won't load a UNet-only repo); can be pricey if always-on | You want everything in the HF ecosystem |
-| **Replicate** | Package the pipeline with Cog, push a model, call its HTTP API | Dead-simple client API, handles queueing, good for demos | Less control; per-prediction pricing; cold starts | You want the fastest path to a shareable link |
-| **Self-hosted GPU** (lab machine or RunPod / Lambda / a cloud GPU VM) | Run the FastAPI container directly on a GPU box | Full control, zero marginal cost on lab hardware, no cold starts if always-on | You own uptime, scaling, and security; idle cost if cloud | The lab already has a GPU server, or cost must be zero |
+**Decision (2026-09-23): Modal.**
 
-**Recommendation:** build the FastAPI service so it is deployment-agnostic, then:
+A research demo gets bursty, low traffic and sits idle most of the day, so the deciding factor is idle cost, not raw GPU price.
+Modal bills per second of container time and scales to zero, so an idle day costs nothing.
+One 30-step SDXL image is about 7s of A10 time (about $0.002); a realistic visit, including a cold start and the idle window before scale-down, is about $0.05-0.10.
+The Starter plan includes **$30/month of free compute**, roughly 300-600 visits a month, which should cover lab-demo traffic at $0.
 
-- **For the public demo:** deploy on **Modal** (or Replicate for the absolute fastest link). Both give autoscaling and scale-to-zero, so idle cost is near zero and you get a stable HTTPS URL for the frontend.
-- **For zero-cost / internal use:** run the identical container on a **lab GPU** if one is available.
+Why Modal fits this codebase specifically:
 
-The important design principle: **the same FastAPI + diffusers code runs in all of these.**
-Modal and Replicate just wrap it; a lab box runs it directly.
-So you never rewrite inference logic when the hosting decision changes.
+- The FastAPI service from Section 6 runs on Modal unchanged (`@modal.asgi_app()`), streaming NDJSON included, so the frozen contract needs no adapter.
+- The frontend already has a cold-start state, and Section 6 covers how scale-from-zero surfaces on Modal.
+- Deploys, secrets, image builds, and logs are all Python and CLI, with no infrastructure to run.
+- `modal serve` gives a hot-reloading dev URL on a real GPU, so nobody needs a local GPU to work on the backend.
+
+**Alternatives considered**
+
+| Option | Why not (for now) |
+| --- | --- |
+| **AWS** (EC2 / SageMaker) | Always-on is the only practical GPU shape: about $590/month (g6.xlarge, L4) to $735/month (g5.xlarge, A10G) on-demand. The AWS Cloud Credit for Research program fits ("science-as-a-service"), but undergrads cannot apply, review takes 90-120 days, and credits expire after a year. |
+| **Hugging Face Inference Endpoints** | Also always-on in practice (scale-to-zero cold starts take minutes), and needs a custom `handler.py` because the repo is UNet-only. |
+| **Hugging Face ZeroGPU Space** | Free to host, but Gradio-only (breaks the frozen contract) and quota is charged to the caller, so all site traffic through one server token shares one account's daily quota. Still worth publishing as a companion demo on the model page (Phase 8). |
+| **Replicate** | Similar economics to Modal, but needs Cog packaging and its own prediction API rather than our FastAPI contract. |
+| **Jetstream2 via NSF ACCESS** | Free always-on GPU VMs (a `g3.large`, half an A100, is plenty) with no wall-clock limit, but it needs an approved allocation with a faculty or grad-student PI. The standby option if traffic outgrows Modal's economics (Section 11). |
+| **AIMS cluster** | 48-hour process cap and a 1-GPU, 5-hour free tier rule out a public service, and campus machines should not face the internet. Good for Phase 5 model validation. |
+
+**Portability principle (kept):** the inference code is a plain FastAPI + diffusers package in `backend/`, and `deploy/modal_app.py` is only a thin wrapper around it.
+If hosting ever changes (for example to Jetstream2), the same package runs under plain `uvicorn` and only the wrapper is replaced.
 
 ---
 
@@ -169,8 +184,54 @@ So you never rewrite inference logic when the hosting decision changes.
 **Model loading (once, at startup / container warm)**
 
 - Load base SDXL + custom UNet in fp16 on CUDA.
-- Apply memory/speed optimizations: `enable_xformers_memory_efficient_attention()` or torch SDPA, optional `enable_model_cpu_offload()` if VRAM is tight, and consider `torch.compile` on the UNet for a speed boost after warmup.
+- Apply memory/speed optimizations: torch SDPA attention (the diffusers default), optional `enable_model_cpu_offload()` if VRAM is tight.
+  Skip `torch.compile`: with scale-to-zero, compile time lands on every cold start and costs more than it saves.
 - Load once into a module-level singleton so requests reuse the warm pipeline; never load per request.
+- Pin the Hugging Face revision (commit SHA) of both `kumo24/sdxl_nuclear` and the SDXL base, so a seed reproduces the same image across deploys.
+
+**Running on Modal**
+
+`deploy/modal_app.py` wraps the `backend/` package in one Modal class:
+
+```python
+@app.cls(
+    gpu="A10",                        # benchmark L4 / A10 / L40S in Phase 5, keep the cheapest per image
+    image=image,                      # weights downloaded at image build time, pinned revisions
+    secrets=[modal.Secret.from_name("nuclear-diffusion-studio")],  # INFERENCE_API_TOKEN
+    enable_memory_snapshot=True,
+    scaledown_window=180,             # seconds idle before scale-to-zero; covers a user iterating on prompts
+    min_containers=0,                 # raise temporarily for a live demo or talk
+    max_containers=2,                 # cost ceiling; excess requests queue at Modal
+    timeout=300,
+)
+class Inference:
+    @modal.enter(snap=True)
+    def load(self):                   # imports + weights into CPU RAM, captured in the memory snapshot
+        self.pipeline = load_pipeline(device="cpu")
+
+    @modal.enter(snap=False)
+    def to_gpu(self):                 # runs on every container start, after the snapshot restore
+        self.pipeline.to("cuda")
+
+    @modal.asgi_app()
+    def web(self):
+        return create_app(self.pipeline)   # the same FastAPI app `uvicorn` serves locally
+```
+
+- **Weights in the image.** Downloading at image build time (`Image.run_function`) makes cold starts independent of Hugging Face availability and bandwidth, and ties each deploy to one exact model revision.
+- **Memory snapshots.** CPU snapshots are stable and restore imports plus CPU-resident weights; only the host-to-GPU copy runs on each cold start.
+  GPU snapshots (`experimental_options={"enable_gpu_snapshot": True}`) would skip that copy too, but they are alpha; revisit once they stabilize.
+- **One request per container.** The class takes no `@modal.concurrent`, so each container serves one generation at a time and Modal queues and scales the rest up to `max_containers`.
+  The in-process GPU lock stays anyway, so plain `uvicorn` runs behave the same.
+- **Auth.** A Modal web endpoint URL is public, so the FastAPI app requires `Authorization: Bearer $INFERENCE_API_TOKEN` (already sent by the proxy) and answers `401` otherwise.
+  The browser never calls the backend directly, so CORS is not needed.
+- **Timeouts.** Modal cuts HTTP requests off at 150s with a `303` redirect; the proxy already gives up at 115s, so that limit is never reached.
+
+**How a cold start surfaces on Modal**
+
+A scale-from-zero request does not get a `503`: Modal holds it until a container is up, then our code runs and streams `accepted` as usual.
+From the browser's side, a cold start is a longer wait before `accepted` (target under 30s with snapshots).
+The contract does not change: `503 ERR_COLD_START` stays valid for other hosts, and the UI treats a slow `accepted` as a UI-only concern (Phase 7).
 
 **API contract (frozen)**
 
@@ -217,6 +278,9 @@ Non-2xx responses carry `{"error":{"code","message","retry_after_s?"}}`; a warmi
 **Safety / abuse**
 
 - Rate-limit by IP (the GPU is the scarce resource).
+  The backend only sees Vercel's IP, so the proxy forwards the client IP in `X-Forwarded-For` and the backend keys its limiter on that, stored in a `modal.Dict` so the limit holds across containers.
+  Forwarding the header is a contract change: update `lib/contract.ts`, `docs/API.md`, the mock, and the proxy together.
+- Hard cost ceiling: a **Modal workspace budget** stops billable work once the monthly limit is hit, and `max_containers` bounds the burn rate below it.
 - Cap prompt length and reject empty prompts.
 - Optionally run a lightweight NSFW/safety check on outputs before returning; note it's a research/domain model, so scope this to your risk tolerance.
 
@@ -312,13 +376,13 @@ nuclear-diffusion-studio/
     .env.local         # INFERENCE_API_URL (unset => route handler serves the mock)
   backend/             # FastAPI + diffusers inference service  <- added later (Track B)
     app/
-      main.py          # FastAPI app, routes
-      pipeline.py      # model loading + generate()
+      main.py          # create_app(pipeline): FastAPI app, routes, bearer auth
+      pipeline.py      # model loading + generate(), pinned model revisions
       schemas.py       # pydantic request/response models (match frontend contract)
+    tests/             # pytest against a fake pipeline, CPU-only (contract, auth, stream shape)
     requirements.txt
-    Dockerfile         # CUDA base image
   deploy/
-    modal_app.py       # Modal wrapper (or replicate cog.yaml / handler.py)
+    modal_app.py       # Modal image + Inference class wrapping backend/ (Section 6)
   docs/
     IMPLEMENTATION_PLAN.md   # this document, moved in on project creation
 ```
@@ -379,29 +443,33 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 
 ### Track B - Inference backend (wire in when the model/GPU is ready)
 
-**Phase 5 - Validate the model (half a day)**
+**Phase 5 - Modal setup & model validation (half a day)**
 
-- Run the load+generate snippet (Section 2) in a GPU notebook.
-- Confirm image quality, capture 6-10 strong example prompts and good default params (these replace the placeholder sample images and seed the example chips).
-- Decide GPU host (Section 5).
+- Create the Modal workspace on the Starter plan, set a **workspace budget** (start at $30/month so the free credit is the ceiling), and create the `nuclear-diffusion-studio` secret with a generated `INFERENCE_API_TOKEN`.
+- Ask the PI to apply to **Modal for Academics** (up to $10k in credits; faculty, postdocs, and PhD students are eligible), so traffic growth never blocks on budget.
+- `modal run` the load+generate snippet (Section 2) and confirm image quality; capture 6-10 strong example prompts and good default params (these seed the example chips).
+- Benchmark L4, A10, and L40S: seconds per image at 1024 and 30 steps, cold-start time with snapshots, and cost per image. Keep the cheapest GPU whose warm latency stays under about 10s.
+- Record the pinned model revisions.
 
 **Phase 6 - Inference service (1-2 days)**
 
-- FastAPI app with `POST /generate`, pydantic validation matching the frozen contract, warm singleton pipeline, GPU lock.
-- Dockerfile on a CUDA base image; verify it runs locally on a GPU (or on the chosen host).
-- Return base64 PNG + seed + timing. Add basic rate limiting.
+- `backend/` FastAPI app with `POST /generate`, pydantic validation matching the frozen contract, warm singleton pipeline, GPU lock, bearer-token auth.
+- Stream NDJSON from `callback_on_step_end`; return a base64 PNG, the seed actually used, and timing.
+- Per-IP rate limiting on the forwarded client IP, with the matching contract change (Section 6, Safety).
+- pytest suite against a fake pipeline, so contract and auth tests run on CPU in CI.
+- `deploy/modal_app.py` per Section 6; iterate with `modal serve`, then point a local `npm run dev` at the dev URL for a real end-to-end run.
 
 **Phase 7 - Deploy backend & flip the switch (1 day)**
 
-- Wrap in Modal (or push to Replicate / deploy to the lab GPU); get a stable HTTPS endpoint; tune keep-warm.
-- Flip the Next.js route handler from **mock to proxy** by setting the `INFERENCE_API_URL` env var - no client-side changes.
-- Lock CORS on the backend to the Vercel origin(s) plus localhost.
-- Final QA: real end-to-end runs, latency check, cold-start handling.
+- `modal deploy deploy/modal_app.py` for a stable HTTPS endpoint.
+- Set `INFERENCE_API_URL` and `INFERENCE_API_TOKEN` in Vercel to flip `/api/generate` from **mock to proxy** - no client-side changes.
+- Cold-start UX: time a real scale-from-zero request. If the wait before `accepted` reads as a hang, show a "warming up" hint in the generating state after a few seconds with no `accepted` (UI-only, contract unchanged), and cover it with a mock scenario and an E2E test.
+- Final QA: real end-to-end runs on desktop and mobile, warm and cold latency, rate-limit and budget-stop behavior.
 
 **Phase 8 (optional, v2) - persistence & extras**
 
 - Object storage for a persistent, shareable gallery with permalinks.
-- Progress streaming (SSE/WebSocket) for a real progress bar.
+- A companion Hugging Face ZeroGPU Space linked from the model page, for visibility in the HF ecosystem.
 - img2img / variations, prompt presets, batch generation, light auth.
 
 ---
@@ -410,29 +478,38 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 
 - **Frontend:** Next.js on Vercel (same as `aims-website`). Ships first with the mock route handler active, so there is a live link before any backend exists.
 - **The flip:** setting `INFERENCE_API_URL` switches the `/api/generate` route handler from mock to proxy - the one config change that turns the demo real. Unset, it serves the mock.
-- **Backend:** container on Modal (autoscale, scale-to-zero) or a lab GPU (always-on). Keep at least one warm instance if cold starts hurt the demo.
-- **Secrets:** none needed in the client; any HF token or storage keys live only in the route handler / backend environment.
-- **CORS:** restrict the backend to the Vercel origin(s) plus localhost for dev.
-- **Monitoring:** log generation timings and failures; watch GPU cost and cold-start frequency.
+- **Backend:** a Modal app (`modal deploy deploy/modal_app.py`), scale-to-zero with `max_containers` as the burn-rate cap. Raise `min_containers` to 1 only for a live demo or talk, then set it back.
+- **Secrets:** none in the client. `INFERENCE_API_TOKEN` lives in Vercel (sent by the proxy) and in the Modal secret (checked by the backend); rotate both together.
+- **Access:** the backend accepts only bearer-authenticated server-to-server calls from the proxy, so no CORS configuration is needed.
+- **Monitoring:** Modal's dashboard for per-container logs, GPU seconds, and spend; log generation timings and failures in the backend; watch cold-start frequency against the scale-down window.
 
 ---
 
 ## 11. Cost notes
 
-- **Serverless GPU (Modal/Replicate):** you pay per second of GPU time. A few seconds per image plus occasional warm-keeping. Cheap at demo/low traffic; scales with usage. Scale-to-zero means near-zero idle cost.
-- **Always-on cloud GPU:** predictable but you pay 24/7 whether used or not - only worth it at steady traffic.
-- **Lab GPU:** zero marginal cost, but you own uptime and exposure to the public internet (put it behind the FastAPI service with rate limiting, and ideally a reverse proxy).
+Modal list prices (September 2026): L4 $0.000222/s, A10 $0.000306/s, L40S $0.000542/s.
+
+| Item | Approximate cost |
+| --- | --- |
+| One warm image (A10, 1024, 30 steps, ~7s) | $0.002 |
+| One visit (cold start + a few images + 180s scale-down tail) | $0.05-0.10 |
+| Idle day | $0 |
+| Starter plan free compute | $30/month, roughly 300-600 visits |
+| One container kept warm 24/7 (A10) | about $800/month - avoid outside live demos |
+
+- **Levers, in order of impact:** the scale-down window (idle tail billed at the GPU rate), cold-start time (snapshots), then GPU choice.
+- **If traffic outgrows the free tier:** Modal for Academics credits first; if usage becomes steady enough that always-on is cheaper, move the same `backend/` package to a free **Jetstream2** GPU VM through an NSF ACCESS Explore allocation (1-page proposal, faculty or grad-student PI) and point `INFERENCE_API_URL` at it.
 
 ---
 
 ## 12. Open questions for Jeremy
 
-1. **GPU hosting:** does the lab have a GPU server we can deploy on, or should this target a serverless GPU platform (Modal/Replicate) for the public demo?
+1. ~~**GPU hosting**~~ - decided 2026-09-23: Modal (Section 5).
 2. **Audience & traffic:** internal lab tool, or a public link that could see real traffic? This sets how hard we harden rate limiting and cold-start handling.
 3. **Persistence:** do we want a saved, shareable gallery of generations (needs object storage), or is a per-session gallery enough for v1?
 4. **Repo:** create `nuclear-diffusion-studio` as a new fourth `aims/` project with its own `jere67` remote, following the group's conventions?
 5. **Branding:** any existing AIMS visual identity / logo to align with, or freedom to define the nuclear theme from scratch?
 
 Because the build is frontend-first, none of these block the start: Track A (design sketch through deployed frontend on the mock) can begin immediately.
-Answers to 1-3 are needed only when Track B (the real inference backend) begins.
+Answers to 2-3 are needed only when Track B (the real inference backend) begins.
 The most urgent input is #5 (branding), which feeds the design sketch in Phase 0.
