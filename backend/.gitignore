@@ -1,0 +1,11 @@
+# local virtualenv (python3 -m venv .venv)
+/.venv/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# secrets: never commit env files
+.env*
+!.env.example

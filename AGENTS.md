@@ -36,6 +36,10 @@ Run from `frontend/`:
 
 ## Rules
 
+- Protect secrets, always. Never print, log, commit, or pass a secret value on a command line.
+  `INFERENCE_API_TOKEN` lives only in gitignored `frontend/.env.local` (mode 600), the Modal secret `nuclear-diffusion-studio`, and later Vercel env vars marked Sensitive.
+  Create or rotate Modal secrets with `modal secret create --from-json <temp file>` and delete the temp file after; check values by comparing hashes, never by displaying them.
+  The backend compares tokens in constant time and never logs the `Authorization` header.
 - The contract is frozen. Change `lib/contract.ts`, `docs/API.md`, the mock, and the proxy together, or not at all.
 - The mock must stay faithful to the contract: every UI state has to be reachable without a backend.
 - The visual base is the Claude Design project "AI Inference Frontend Console" (`Inference Console.dc.html`): monochrome on true black, amber only for alerts. Iterate on it with `/impeccable`; do not introduce new accent colors.

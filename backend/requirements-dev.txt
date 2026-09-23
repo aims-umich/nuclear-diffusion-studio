@@ -1,0 +1,3 @@
+# Local tooling only: the Modal CLI/client that builds and deploys the GPU service.
+# The inference runtime (torch, diffusers) is installed inside the Modal image, not locally.
+modal==1.5.5

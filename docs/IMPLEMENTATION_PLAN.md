@@ -380,7 +380,8 @@ nuclear-diffusion-studio/
       pipeline.py      # model loading + generate(), pinned model revisions
       schemas.py       # pydantic request/response models (match frontend contract)
     tests/             # pytest against a fake pipeline, CPU-only (contract, auth, stream shape)
-    requirements.txt
+    requirements.txt   # inference runtime, installed into the Modal image (torch, diffusers, FastAPI)
+    requirements-dev.txt  # local tooling only (Modal CLI, pytest); no torch on laptops
   deploy/
     modal_app.py       # Modal image + Inference class wrapping backend/ (Section 6)
   docs/
