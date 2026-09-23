@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+ * NuclearDiffusion theme - taken directly from the Claude Design base
+ * ("Inference Console.dc.html"): a monochrome control-room console on true
+ * black, with amber reserved strictly for alerts. The app is dark-only by
+ * design, so there is no light palette.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Design palette */
+  --canvas: #000000;
+  --field: #0c0c0d;
+  --panel: #0b0b0c;
+  --panel-foot: #0a0a0b;
+  --hatch-a: #101011;
+  --hatch-b: #0c0c0d;
+  --fg: #f2f2f3;
+  --fg-soft: #c8ccd2;
+  --fg-muted: #a2a3a6;
+  --fg-subtle: #8a8b8f;
+  --fg-faint: #838a94;
+  --fg-ghost: #6f7176;
+  --on-fg: #050505;
+  --range: #cfd0d2;
+  --meter: #e6e7e9;
+  --warn: #f6b23c;
+
+  /* shadcn/ui semantic tokens, mapped onto the design palette */
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--panel);
+  --card-foreground: var(--fg);
+  --popover: var(--panel);
+  --popover-foreground: var(--fg);
+  --primary: var(--fg);
+  --primary-foreground: var(--on-fg);
+  --secondary: rgb(255 255 255 / 0.07);
+  --secondary-foreground: var(--fg);
+  --muted: rgb(255 255 255 / 0.16);
+  --muted-foreground: var(--fg-subtle);
+  --accent: rgb(255 255 255 / 0.06);
+  --accent-foreground: var(--fg);
+  --destructive: var(--warn);
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.1);
+  --ring: rgb(255 255 255 / 0.35);
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-field: var(--field);
+  --color-panel: var(--panel);
+  --color-panel-foot: var(--panel-foot);
+  --color-hatch-a: var(--hatch-a);
+  --color-hatch-b: var(--hatch-b);
+  --color-fg: var(--fg);
+  --color-fg-soft: var(--fg-soft);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-ghost: var(--fg-ghost);
+  --color-on-fg: var(--on-fg);
+  --color-range: var(--range);
+  --color-meter: var(--meter);
+  --color-warn: var(--warn);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+
+  /* Composer and output sit side by side from here; below it they stack. */
+  --breakpoint-split: 61.25rem;
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-breathe: breathe 2s ease-in-out infinite;
+  --animate-breathe-slow: breathe 3.4s ease-in-out infinite;
+  --animate-reveal: reveal 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  /* A finished render resolves into focus, echoing the denoise it just completed. */
+  @keyframes reveal {
+    from {
+      opacity: 0;
+      filter: blur(8px);
+      transform: scale(0.985);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+      transform: scale(1);
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-110%);
+    }
+    100% {
+      transform: translateX(300%);
+    }
+  }
+
+  @keyframes breathe {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
+
+@utility bg-hatch {
+  background: repeating-linear-gradient(135deg, var(--hatch-a) 0 11px, var(--hatch-b) 11px 22px);
+}
+
+@utility bg-hatch-fine {
+  background: repeating-linear-gradient(135deg, #131314 0 8px, #0d0d0e 8px 16px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply bg-canvas font-sans text-fg antialiased;
+  }
+
+  body {
+    @apply min-h-dvh bg-canvas;
+    background-image: radial-gradient(100% 54% at 50% -12%, rgb(255 255 255 / 0.022), transparent 62%);
+    background-repeat: no-repeat;
+  }
+
+  ::selection {
+    background: rgb(255 255 255 / 0.16);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(255 255 255 / 0.55);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
