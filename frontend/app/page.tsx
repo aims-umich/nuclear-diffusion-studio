@@ -1,7 +1,7 @@
-import { InferenceConsole } from "@/components/console/inference-console";
+import { Studio } from "@/components/studio/studio";
 
 export default function Home() {
   // Resolved at build time: flipping INFERENCE_API_URL on Vercel triggers a redeploy anyway.
   const mode = process.env.INFERENCE_API_URL ? "live" : "mock";
-  return <InferenceConsole mode={mode} />;
+  return <Studio mode={mode} />;
 }

@@ -36,7 +36,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }
       toastOptions={{
         classNames: {
-          toast: "cn-toast",
+          // Modal dialogs set pointer-events: none on the page; toasts (like Undo) must stay clickable.
+          toast: "cn-toast pointer-events-auto",
         },
       }}
       {...props}

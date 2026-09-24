@@ -51,7 +51,7 @@ export function renderMockImage(options: {
     `<circle cx="${CENTER}" cy="${CENTER}" r="470" fill="url(#g)"/>`,
     renderRings(),
     `<g transform="rotate(${rotation} ${CENTER} ${CENTER})">${cellMarkup}</g>`,
-    renderLabel(x, y + view.height),
+    renderLabel(x, y),
     "</svg>",
   ].join("");
 }
@@ -152,9 +152,9 @@ function renderRings() {
   ].join("");
 }
 
-function renderLabel(left: number, bottom: number) {
-  // The UI shows the seed in its own badge; the image only needs to say it is not model output.
-  return `<text x="${(left + 40).toFixed(1)}" y="${(bottom - 40).toFixed(1)}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" letter-spacing="3" fill="${FG}" fill-opacity="0.45">MOCK OUTPUT</text>`;
+function renderLabel(left: number, top: number) {
+  // Top-left, clear of the seed badge the UI draws bottom-left; the image only needs to say it is not model output.
+  return `<text x="${(left + 40).toFixed(1)}" y="${(top + 56).toFixed(1)}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" letter-spacing="3" fill="${FG}" fill-opacity="0.45">MOCK OUTPUT</text>`;
 }
 
 export function svgToDataUrl(svg: string): string {
