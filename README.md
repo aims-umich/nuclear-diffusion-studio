@@ -1,9 +1,11 @@
 # NuclearDiffusion Studio
 
-A web console for generating nuclear-engineering imagery with the AIMS Lab's fine-tuned SDXL model, [`kumo24/sdxl_nuclear`](https://huggingface.co/kumo24/sdxl_nuclear), from the NuclearDiffusion paper ([arXiv:2608.04030](https://arxiv.org/abs/2608.04030)).
+A web studio for generating nuclear-engineering imagery with the AIMS Lab's fine-tuned SDXL model, [`kumo24/sdxl_nuclear`](https://huggingface.co/kumo24/sdxl_nuclear), from the NuclearDiffusion paper ([arXiv:2608.04030](https://arxiv.org/abs/2608.04030)).
 
-Write a prompt, tune steps, guidance, seed, and size, and watch the image denoise with live step-by-step progress.
-Each result keeps its seed and parameters so it can be reproduced, varied, or downloaded, and the session strip keeps every generation from the visit.
+Write a prompt, pick an aspect ratio and how many images to make, tune steps, guidance, seed, and a negative prompt, and watch each image denoise with live step-by-step progress.
+Generations are organised into threads, like a chat history, and saved in the browser.
+Every image keeps its seed and parameters, so it can be reproduced, varied, or downloaded.
+The settings offered are the ones the model actually supports; see "What the model supports" in [`docs/API.md`](docs/API.md).
 
 ## Status
 

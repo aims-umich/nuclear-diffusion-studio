@@ -40,7 +40,7 @@ Users type a prompt, the fine-tuned model generates a nuclear-domain image, and 
 ## 2. The critical fact about the model
 
 `kumo24/sdxl_nuclear` is **a fine-tuned SDXL UNet**, not a full pipeline and not a LoRA.
-This has three consequences that shape everything below:
+This has four consequences that shape everything below:
 
 1. **It must be composed with the base model at load time.**
    You load the custom UNet and inject it into the standard SDXL base pipeline:
@@ -61,9 +61,8 @@ This has three consequences that shape everything below:
 
    image = pipe(
        prompt="a pressurized water reactor containment building, technical diagram",
-       negative_prompt="blurry, low quality",
-       num_inference_steps=30,
-       guidance_scale=7.5,
+       num_inference_steps=50,         # the model card and paper's setting
+       guidance_scale=5.0,             # the SDXL pipeline default the model card uses
    ).images[0]
    ```
 
@@ -72,6 +71,12 @@ This has three consequences that shape everything below:
 
 3. **The model is on the Hugging Face Hub under Apache 2.0**, downloaded on demand.
    The base SDXL weights (~7 GB) plus the custom UNet download on first load, so container images and cold starts must account for that.
+
+4. **SDXL sets the limits the app can honestly offer** (verified 2026-09-24 against the model card, its UNet `config.json`, and the paper).
+   The fine-tune was trained only on 1024x1024 images, so that is the default and other sizes are limited to SDXL-native ~1 MP presets marked experimental; 512 and 768 are dropped because SDXL degrades below ~1 MP.
+   The CLIP text encoders read 75 usable tokens and silently drop the rest, so the service reports truncation.
+   The base pipeline's scheduler is Euler (`euler`), and guidance 1.0 disables classifier-free guidance, which makes a negative prompt a no-op.
+   `docs/API.md` ("What the model supports") is the reference.
 
 A quick reproducibility step is worth doing before writing any app code: run the snippet above on a GPU (`modal run`, or the AIMS cluster's 1-GPU, 5-hour free tier), confirm the model loads and produces a sane nuclear-domain image, and record a few known-good prompts and parameter values.
 Those become the app's defaults and the seed content for a prompt-gallery.
@@ -153,7 +158,7 @@ The frontend is trivial to host. The real choice is how to serve GPU inference.
 
 A research demo gets bursty, low traffic and sits idle most of the day, so the deciding factor is idle cost, not raw GPU price.
 Modal bills per second of container time and scales to zero, so an idle day costs nothing.
-One 30-step SDXL image is about 7s of A10 time (about $0.002); a realistic visit, including a cold start and the idle window before scale-down, is about $0.05-0.10.
+One 50-step SDXL image (the model card's setting) is about 12s of A10 time (about $0.004); a realistic visit, including a cold start and the idle window before scale-down, is about $0.05-0.10.
 The Starter plan includes **$30/month of free compute**, roughly 300-600 visits a month, which should cover lab-demo traffic at $0.
 
 Why Modal fits this codebase specifically:
@@ -240,12 +245,13 @@ The contract does not change: `503 ERR_COLD_START` stays valid for other hosts, 
 ```jsonc
 // request
 {
-  "prompt": "string (required, 1-500 chars)",
+  "prompt": "string (required, 1-500 chars; only 75 CLIP tokens reach the model)",
   "negative_prompt": "string (optional)",
-  "num_inference_steps": 30,      // 10-50, default 30
-  "guidance_scale": 7.5,          // 1-15, default 7.5
-  "width": 1024,                  // 512 | 768 | 1024
+  "num_inference_steps": 50,      // 10-50, default 50
+  "guidance_scale": 5.0,          // 1-15, default 5.0
+  "width": 1024,                  // with height, one of the six SDXL presets in docs/API.md
   "height": 1024,
+  "num_images": 1,                // 1-4, one batch; image i uses seed + i
   "seed": 12345                   // optional uint32; omit for random
 }
 ```
@@ -253,9 +259,9 @@ The contract does not change: `503 ERR_COLD_START` stays valid for other hosts, 
 A successful response is an `application/x-ndjson` stream: `accepted` first, one `progress` per denoising step, then exactly one `result` or `error`.
 
 ```jsonc
-{"type":"accepted","seed":12345,"total_steps":30,"model":"kumo24/sdxl_nuclear"}
-{"type":"progress","step":1,"total_steps":30}
-{"type":"result","image":"data:image/png;base64,...","seed":12345,"params":{...,"scheduler":"euler_a"},"timing_ms":4200,"model":"kumo24/sdxl_nuclear"}
+{"type":"accepted","seed":12345,"total_steps":50,"num_images":2,"model":"kumo24/sdxl_nuclear"}
+{"type":"progress","step":1,"total_steps":50}
+{"type":"result","images":[{"image":"data:image/png;base64,...","seed":12345},{"image":"...","seed":12346}],"params":{...,"scheduler":"euler","prompt_truncated":false},"timing_ms":23400,"model":"kumo24/sdxl_nuclear"}
 ```
 
 Non-2xx responses carry `{"error":{"code","message","retry_after_s?"}}`; a warming model returns `503` + `Retry-After` (`ERR_COLD_START`).
@@ -265,7 +271,7 @@ Non-2xx responses carry `{"error":{"code","message","retry_after_s?"}}`; a warmi
 
 **Concurrency and latency**
 
-- A single GPU processes one image at a time; SDXL at 30 steps is ~3-8s on an A10G/A100 once warm.
+- A single GPU runs one pipeline call at a time; SDXL at 50 steps is ~5-12s per image on an A10G/A100 once warm, and a batch of n images takes roughly n times as long.
 - Serialize GPU access with a lock or a small in-process queue so concurrent requests don't collide on the device.
 - Set generous client and server timeouts (60-120s) to survive cold starts and queueing.
 - Consider a job model (`POST /generate` returns a `job_id`, client polls `GET /jobs/{id}`) if you expect bursts; for a v1 demo, a synchronous request with a loading state is simpler and fine.
@@ -286,63 +292,49 @@ Non-2xx responses carry `{"error":{"code","message","retry_after_s?"}}`; a warmi
 
 ---
 
-## 7. Frontend design - "nuclear" without being loud
+## 7. Frontend design - a standard image studio
 
-Design direction: **precise, technical, and quietly energetic.**
-Think research instrument and clean control room, not radioactive-green cliches.
-A visual sketch of this console is produced with the `design` skill for sign-off *before* implementation (see Phase 0 in the roadmap); the `frontend-design` skill guides the actual build for a distinctive, non-templated result.
+**Decided 2026-09-24:** the console became a three-pane image-generation studio in the style of Google AI Studio, ChatGPT Images, and Gemini.
+The authoritative design is `Studio v2.dc.html` in the Claude Design project "AI Inference Frontend Console" (https://claude.ai/design/p/dd0f1479-3a31-464f-a7be-1e2e305d3fda?file=Studio+v2.dc.html).
+The original `Inference Console.dc.html` stays in that project as the superseded base.
+
+**Layout**
+
+- **Left sidebar:** New thread, Explore examples, and the thread history (named after each thread's first prompt, grouped Today / Previous 7 days / Older, with delete and undo).
+  The footer shows the model, a status light, a Mock badge in mock mode, and links to the paper and model card.
+  It collapses to an icon rail, and becomes a drawer below 860px.
+- **Center:** a chat-like feed of generation turns (prompt, settings, 1-4 images, Regenerate and Edit prompt) above a pinned composer.
+  Enter sends and Shift+Enter adds a line.
+  A new thread shows the Explore page: example prompts filtered by category.
+- **Right, "Run settings":** model card, aspect ratio, images per run, steps, guidance, and a collapsed Advanced group (seed, negative prompt, read-only scheduler).
+  Inline from 1200px, a sheet below.
+- **Lightbox:** full-size view with arrow keys through a batch.
 
 **Art direction**
 
-- **Palette:** deep graphite / near-black base (control-room dark), cool steel grays, with a single restrained accent - a Cherenkov-style electric cyan-blue, used sparingly for the primary action, focus rings, and the "charging" glow. A warning-amber as a secondary accent for alerts only. Avoid saturated hazard-green everywhere; a hint goes a long way.
-- **Typography:** a clean geometric or grotesk sans for UI (e.g. Inter, Geist, or Space Grotesk) paired with a monospace (e.g. JetBrains Mono) for parameter readouts and the seed value - the mono gives it the instrument feel.
-- **Texture / motif:** subtle. A faint hex/lattice grid, thin concentric "containment" rings behind the hero, a soft radial glow that intensifies while generating. Keep motion physical and smooth, never flashy.
-- **Layout:** a focused generation console. Prompt input front and center, an "Advanced controls" panel (collapsible) for steps/guidance/seed/size, and a large result stage. On desktop, a two-column split (controls left, result right); stacked on mobile.
+- **Palette:** true black with neutral gray layers and one accent, Cherenkov blue (#4c8dff; #2f6feb for filled buttons), used only for the primary action, selected controls, and generation progress.
+  Amber (#f6b23c) is reserved for alerts.
+- **Typography:** IBM Plex Sans for the interface and IBM Plex Mono only for real data (seeds, sizes, step counts).
+- **Signature moment:** while denoising, each image tile fills with Cherenkov-blue light from the bottom as steps advance; it replaces a progress bar.
 
-**Key UI states**
+**Honest model limits in the UI**
 
-- **Idle:** big prompt field, example-prompt chips (seeded from your known-good prompts), primary "Generate" button with a subtle pulse.
-- **Generating:** result stage shows a charging/scanline/glow animation; if progress streaming is wired up, a real progress bar; controls disabled.
-- **Result:** image reveals with a smooth fade/scale; show the prompt, the seed, and the params used; actions: Download, Copy seed, "Use as base for a variation" (re-run with same seed), Regenerate.
-- **Error:** clear, on-theme message (e.g. "Reactor offline - the model is warming up, try again in a moment") distinguishing cold-start vs. real failure.
-
-**Components**
-
-- Prompt box with example chips and a character counter.
-- Advanced controls: sliders (steps, guidance), seed input with a randomize/dice button, size selector.
-- Result card with metadata and action row.
-- Optional session gallery: a strip of this session's generations (in-memory or `localStorage`); a persistent gallery needs the storage layer from Section 3.
+- Non-square sizes carry an "experimental" note because the fine-tune saw only squares.
+- The composer estimates CLIP tokens and warns past 75; the result says when the backend truncated a prompt.
+- The negative prompt field warns that it has no effect at guidance 1.0.
 
 **Accessibility & responsiveness**
 
-- Full keyboard support, visible focus states, proper labels on every control (use Radix primitives).
-- Respect `prefers-reduced-motion` - drop the heavy glow/scanline animations for those users.
-- Works cleanly at phone width with no horizontal scroll.
+- Full keyboard support (Cmd/Ctrl+Enter, Esc to cancel, arrow keys in radio groups and the lightbox), visible focus rings, labels on every control, and Radix dialogs for the drawer, sheet, and lightbox.
+- `prefers-reduced-motion` drops the glow transition and the reveal.
+- Works at phone width with no horizontal scroll; image actions stay visible on touch screens.
 
-**Base design source (decided)**
+**Persistence**
 
-The base design is not built from scratch: it comes from a Claude Design project Jeremy iterated on, a simple, bare-bones layout of the inference console.
-That project is imported via the Claude Design MCP and its `Inference Console.dc.html` is the starting point the Next.js UI is built from.
-The exact prompt below is used verbatim to set up the base design at the start of the frontend build (Phase 1); the earlier `design`-skill mockup in this plan is a directional reference, while this Claude Design project is the authoritative base layout.
-
-```text
-Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
-https://claude.ai/design/p/dd0f1479-3a31-464f-a7be-1e2e305d3fda?file=Inference+Console.dc.html
-
-Focus on these files (the whole project is readable):
-- `Inference Console.dc.html`
-
-Also read these files the selection imports:
-- `support.js`
-
-Implement: `Inference Console.dc.html`
-```
-
-Notes for when implementation begins:
-
-- Authenticate the Claude Design MCP first with `/design-login` before running the import.
-- Read `Inference Console.dc.html` and the `support.js` it imports, then translate that layout into the Next.js + Tailwind + shadcn/ui structure (Section 8) rather than pasting raw markup - keep the design's layout and hierarchy, adapt it to real components and the nuclear theme tokens.
-- The imported design defines the base; the states, mock wiring, and polish from Sections 6-7 and the roadmap layer on top of it.
+- Threads are saved in the browser's IndexedDB (real PNGs are megabytes, beyond localStorage's quota), capped at 100.
+- Run settings and panel layout are saved in localStorage.
+- `?thread=<id>` reopens a thread after a reload.
+- A shareable, cross-device gallery still needs the object storage in Section 3 (Phase 8).
 
 ---
 
@@ -358,16 +350,20 @@ nuclear-diffusion-studio/
   LICENSE
   frontend/            # Next.js (App Router) + TypeScript + Tailwind app  <- built first
     app/
-      page.tsx         # the generation console
+      page.tsx         # the studio
       layout.tsx
       api/
         generate/
           route.ts     # mock in frontend-first phase, then proxy to backend
     components/
       ui/              # shadcn/ui components (copied in)
-      console/         # prompt box, controls, result stage, gallery
+      studio/          # sidebar, feed, composer, run settings, explore, lightbox
+    hooks/             # useStudio (reducer + network + persistence), useMediaQuery
     lib/
-      api.ts           # typed client for /api/generate (contract lives here)
+      contract.ts      # the frozen /api/generate contract (zod)
+      api.ts           # typed streaming client for /api/generate
+      studio-state.ts  # pure reducer: threads, turns, the running generation
+      storage.ts       # IndexedDB thread store + localStorage preferences
       mock/            # placeholder images + fake seed/timing/state generator
     app/globals.css    # Tailwind v4 theme tokens (no tailwind.config in v4)
     tests/unit/        # Vitest: contract, mock engine, reducer, client, route (both modes)
@@ -426,6 +422,8 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 - Keep the frozen API contract and the mock layer untouched; this phase reshapes the UI only, so it stays fully exercisable without a backend.
 - Exit criterion: the console reads as a polished research product (per the Section 7 art direction), passes a pixel-perfect review, and holds up on desktop and mobile.
 
+> **Superseded 2026-09-24** by the studio redesign (Section 7): the notes below describe the first console.
+
 > **As built (Phases 1-3):**
 > - Stack: Next.js 16.3 (App Router, Turbopack), React 19.2, Tailwind v4.3, shadcn/ui 4 on Radix, zod 4, Vitest 5, Playwright 1.63.
 > - The Claude Design base is monochrome (black and white, amber only for alerts); it supersedes the cyan palette in Section 7 and the `design`-skill mockup.
@@ -449,7 +447,7 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 - Create the Modal workspace on the Starter plan, set a **workspace budget** (start at $30/month so the free credit is the ceiling), and create the `nuclear-diffusion-studio` secret with a generated `INFERENCE_API_TOKEN`.
 - Ask the PI to apply to **Modal for Academics** (up to $10k in credits; faculty, postdocs, and PhD students are eligible), so traffic growth never blocks on budget.
 - `modal run` the load+generate snippet (Section 2) and confirm image quality; capture 6-10 strong example prompts and good default params (these seed the example chips).
-- Benchmark L4, A10, and L40S: seconds per image at 1024 and 30 steps, cold-start time with snapshots, and cost per image. Keep the cheapest GPU whose warm latency stays under about 10s.
+- Benchmark L4, A10, and L40S: seconds per image at 1024 and 50 steps (and a batch of 4), cold-start time with snapshots, and cost per image. Keep the cheapest GPU whose warm single-image latency stays under about 15s.
 - Record the pinned model revisions.
 
 **Phase 6 - Inference service (1-2 days)**
@@ -467,11 +465,17 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 - Cold-start UX: time a real scale-from-zero request. If the wait before `accepted` reads as a hang, show a "warming up" hint in the generating state after a few seconds with no `accepted` (UI-only, contract unchanged), and cover it with a mock scenario and an E2E test.
 - Final QA: real end-to-end runs on desktop and mobile, warm and cold latency, rate-limit and budget-stop behavior.
 
+**Phase 3b - Studio redesign (2026-09-24)** - done
+
+- Rebuilt the console as the three-pane studio in Section 7 from the approved `Studio v2.dc.html`.
+- Aligned the contract with what the model supports: SDXL-native sizes, batches of 1-4, truncation flags, the `euler` scheduler, and model-card defaults (50 steps, guidance 5.0).
+- Threads persist in the browser (IndexedDB).
+
 **Phase 8 (optional, v2) - persistence & extras**
 
-- Object storage for a persistent, shareable gallery with permalinks.
+- Object storage for a persistent, shareable, cross-device gallery with permalinks (local thread history already exists).
 - A companion Hugging Face ZeroGPU Space linked from the model page, for visibility in the HF ecosystem.
-- img2img / variations, prompt presets, batch generation, light auth.
+- img2img, prompt presets, light auth.
 
 ---
 
@@ -492,7 +496,7 @@ Modal list prices (September 2026): L4 $0.000222/s, A10 $0.000306/s, L40S $0.000
 
 | Item | Approximate cost |
 | --- | --- |
-| One warm image (A10, 1024, 30 steps, ~7s) | $0.002 |
+| One warm image (A10, 1024, 50 steps, ~12s) | $0.004 |
 | One visit (cold start + a few images + 180s scale-down tail) | $0.05-0.10 |
 | Idle day | $0 |
 | Starter plan free compute | $30/month, roughly 300-600 visits |
@@ -507,7 +511,7 @@ Modal list prices (September 2026): L4 $0.000222/s, A10 $0.000306/s, L40S $0.000
 
 1. ~~**GPU hosting**~~ - decided 2026-09-23: Modal (Section 5).
 2. **Audience & traffic:** internal lab tool, or a public link that could see real traffic? This sets how hard we harden rate limiting and cold-start handling.
-3. **Persistence:** do we want a saved, shareable gallery of generations (needs object storage), or is a per-session gallery enough for v1?
+3. **Persistence:** partly decided 2026-09-24: thread history is saved per browser (IndexedDB). Still open: do we want a shareable, cross-device gallery (needs object storage)?
 4. **Repo:** create `nuclear-diffusion-studio` as a new fourth `aims/` project with its own `jere67` remote, following the group's conventions?
 5. **Branding:** any existing AIMS visual identity / logo to align with, or freedom to define the nuclear theme from scratch?
 
