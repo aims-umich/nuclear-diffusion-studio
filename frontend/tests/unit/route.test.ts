@@ -22,9 +22,18 @@ async function events(response: Response) {
 }
 
 const upstreamResult = {
-  image: "data:image/png;base64,AA==",
-  seed: 11,
-  params: { prompt: "dome", num_inference_steps: 10, guidance_scale: 7.5, width: 512, height: 512, scheduler: "euler" },
+  images: [{ image: "data:image/png;base64,AA==", seed: 11 }],
+  params: {
+    prompt: "dome",
+    num_inference_steps: 10,
+    guidance_scale: 5,
+    width: 1024,
+    height: 1024,
+    num_images: 1,
+    scheduler: "euler",
+    prompt_truncated: false,
+    negative_prompt_truncated: false,
+  },
   timing_ms: 4000,
   model: "kumo24/sdxl_nuclear",
 };
@@ -43,7 +52,7 @@ afterEach(() => {
 
 describe("POST /api/generate (mock mode)", () => {
   it("streams a padded NDJSON response ending in a result", async () => {
-    const response = await POST(post({ prompt: "dome", num_inference_steps: 10, width: 512, height: 512, seed: 3 }));
+    const response = await POST(post({ prompt: "dome", num_inference_steps: 10, num_images: 2, seed: 3 }));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/x-ndjson");
     expect(response.headers.get("x-accel-buffering")).toBe("no");
@@ -52,8 +61,8 @@ describe("POST /api/generate (mock mode)", () => {
     expect(raw.indexOf("\n")).toBeGreaterThan(1024); // first line padded past WebKit's buffer
 
     const stream = await events(response);
-    expect(stream[0]).toMatchObject({ type: "accepted", seed: 3, total_steps: 10 });
-    expect(stream.at(-1)).toMatchObject({ type: "result", seed: 3 });
+    expect(stream[0]).toMatchObject({ type: "accepted", seed: 3, total_steps: 10, num_images: 2 });
+    expect(stream.at(-1)).toMatchObject({ type: "result", images: [{ seed: 3 }, { seed: 4 }] });
   });
 
   it("rejects invalid bodies with the error contract", async () => {
@@ -64,6 +73,10 @@ describe("POST /api/generate (mock mode)", () => {
     const invalid = await POST(post({ prompt: "" }));
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).error.message).toContain("Prompt is required");
+
+    const tooSmall = await POST(post({ prompt: "dome", width: 512, height: 512 }));
+    expect(tooSmall.status).toBe(400);
+    expect((await tooSmall.json()).error.message).toContain("Size must be one of 1024x1024");
   });
 
   it("simulates a cold start when forced", async () => {
@@ -84,7 +97,7 @@ describe("POST /api/generate (proxy mode)", () => {
     const upstream = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         [
-          { type: "accepted", seed: 11, total_steps: 10, model: "kumo24/sdxl_nuclear" },
+          { type: "accepted", seed: 11, total_steps: 10, num_images: 1, model: "kumo24/sdxl_nuclear" },
           { type: "progress", step: 1, total_steps: 10 },
           { type: "result", ...upstreamResult },
         ]
@@ -95,11 +108,11 @@ describe("POST /api/generate (proxy mode)", () => {
     );
     vi.stubGlobal("fetch", upstream);
 
-    const response = await POST(post({ prompt: " dome ", width: 512, height: 512, num_inference_steps: 10 }));
+    const response = await POST(post({ prompt: " dome ", width: 832, height: 1216, num_inference_steps: 10 }));
     const [url, init] = upstream.mock.calls[0];
     expect(url).toBe("https://gpu.example.test/generate");
     expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer secret-token");
-    expect(JSON.parse(init?.body as string)).toMatchObject({ prompt: "dome", guidance_scale: 7.5 });
+    expect(JSON.parse(init?.body as string)).toMatchObject({ prompt: "dome", guidance_scale: 5, width: 832, height: 1216, num_images: 1 });
 
     expect((await events(response)).map((event) => event.type)).toEqual(["accepted", "progress", "result"]);
   });
@@ -108,7 +121,7 @@ describe("POST /api/generate (proxy mode)", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(upstreamResult)));
     const stream = await events(await POST(post({ prompt: "dome" })));
     expect(stream).toEqual([
-      { type: "accepted", seed: 11, total_steps: 10, model: "kumo24/sdxl_nuclear" },
+      { type: "accepted", seed: 11, total_steps: 10, num_images: 1, model: "kumo24/sdxl_nuclear" },
       { type: "result", ...upstreamResult },
     ]);
   });

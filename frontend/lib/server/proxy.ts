@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   AppliedParamsSchema,
   ERROR_CODES,
+  GeneratedImageSchema,
   ErrorBodySchema,
   MODEL,
   NDJSON_CONTENT_TYPE,
@@ -33,8 +34,7 @@ export type ProxyOptions = {
 
 /** The synchronous response shape a simpler backend may return. */
 const SyncResultSchema = z.object({
-  image: z.string(),
-  seed: z.int(),
+  images: z.array(GeneratedImageSchema).min(1),
   params: AppliedParamsSchema.extend({ scheduler: z.string().default("unknown") }),
   timing_ms: z.number(),
   model: z.string().default(MODEL.id),
@@ -125,6 +125,12 @@ async function* relayStream(body: ReadableStream<Uint8Array>): AsyncGenerator<St
 }
 
 async function* syncToEvents(result: z.infer<typeof SyncResultSchema>): AsyncGenerator<StreamEvent> {
-  yield { type: "accepted", seed: result.seed, total_steps: result.params.num_inference_steps, model: result.model };
+  yield {
+    type: "accepted",
+    seed: result.images[0].seed,
+    total_steps: result.params.num_inference_steps,
+    num_images: result.images.length,
+    model: result.model,
+  };
   yield { type: "result", ...result };
 }

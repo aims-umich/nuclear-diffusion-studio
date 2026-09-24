@@ -17,7 +17,7 @@ function generation(id: string): Generation {
     id,
     image: "data:image/png;base64,AA==",
     seed: 1,
-    params: { prompt: "p", num_inference_steps: 30, guidance_scale: 7.5, width: 1024, height: 1024, scheduler: "euler_a" },
+    params: { prompt: "p", num_inference_steps: 30, guidance_scale: 7.5, width: 1024, height: 1024, num_images: 1, scheduler: "euler", prompt_truncated: false, negative_prompt_truncated: false },
     timingMs: 3000,
     model: "m",
   };

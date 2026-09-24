@@ -5,6 +5,10 @@
  * mock inference layer, and the proxy to the Python inference service. The
  * FastAPI backend (Track B) must implement exactly this shape - see
  * docs/API.md for the wire-level description.
+ *
+ * Every knob here is one the model actually supports. `kumo24/sdxl_nuclear` is
+ * a fine-tuned SDXL UNet loaded into the stock SDXL base pipeline, so sizes,
+ * the scheduler, and the prompt token limit all come from SDXL itself.
  */
 import { z } from "zod";
 
@@ -13,26 +17,61 @@ export const MODEL = {
   id: "kumo24/sdxl_nuclear",
   /** Short display name used throughout the UI. */
   label: "nd-xl",
+  /** The pipeline the UNet is loaded into. */
+  base: "stabilityai/stable-diffusion-xl-base-1.0",
   precision: "fp16",
+  /** The SDXL base pipeline's default scheduler (EulerDiscreteScheduler). */
+  scheduler: "euler",
+  /**
+   * SDXL's CLIP text encoders read 77 tokens, two of which are the start and
+   * end markers. Anything past this is dropped by the pipeline.
+   */
+  maxPromptTokens: 75,
 } as const;
 
+/**
+ * The output sizes offered, all SDXL-native (about one megapixel, sides
+ * divisible by 64). SDXL degrades well below this pixel count, so smaller
+ * sizes are deliberately absent. The fine-tune itself was trained only on
+ * 1024x1024 images, which is why non-square presets are flagged `trained: false`.
+ */
+export const SIZE_PRESETS = [
+  { id: "1:1", width: 1024, height: 1024, trained: true },
+  { id: "4:3", width: 1152, height: 896, trained: false },
+  { id: "3:4", width: 896, height: 1152, trained: false },
+  { id: "3:2", width: 1216, height: 832, trained: false },
+  { id: "2:3", width: 832, height: 1216, trained: false },
+  { id: "16:9", width: 1344, height: 768, trained: false },
+] as const;
+
+export type SizePreset = (typeof SIZE_PRESETS)[number];
+export type SizeId = SizePreset["id"];
+
+export function findSizePreset(width: number, height: number): SizePreset | undefined {
+  return SIZE_PRESETS.find((preset) => preset.width === width && preset.height === height);
+}
+
+export function sizePresetById(id: SizeId): SizePreset {
+  return SIZE_PRESETS.find((preset) => preset.id === id) ?? SIZE_PRESETS[0];
+}
+
+/** Defaults follow the model card and the NuclearDiffusion paper (50 steps, guidance 5.0, no negative prompt). */
 export const LIMITS = {
   promptMaxLength: 500,
   negativePromptMaxLength: 500,
-  steps: { min: 10, max: 50, default: 30 },
-  guidance: { min: 1, max: 15, step: 0.5, default: 7.5 },
-  sizes: [512, 768, 1024] as const,
-  defaultSize: 1024,
+  steps: { min: 10, max: 50, default: 50 },
+  guidance: { min: 1, max: 15, step: 0.5, default: 5 },
+  images: { min: 1, max: 4, default: 1 },
   /** Seeds are unsigned 32-bit integers. */
   seedMax: 4_294_967_295,
 } as const;
 
-export type ImageSize = (typeof LIMITS.sizes)[number];
+export const DEFAULT_SIZE = SIZE_PRESETS[0];
 
-const sizeSchema = z.union(
-  LIMITS.sizes.map((size) => z.literal(size)),
-  { error: `Size must be one of ${LIMITS.sizes.join(", ")}` },
-);
+/** Image `index` of a batch uses the base seed plus its index, wrapping within uint32. */
+export function seedForImage(baseSeed: number, index: number): number {
+  return (baseSeed + index) >>> 0;
+}
 
 export const GenerateRequestSchema = z
   .object({
@@ -56,12 +95,22 @@ export const GenerateRequestSchema = z
       .min(LIMITS.guidance.min)
       .max(LIMITS.guidance.max)
       .default(LIMITS.guidance.default),
-    width: sizeSchema.default(LIMITS.defaultSize),
-    height: sizeSchema.default(LIMITS.defaultSize),
+    width: z.int().default(DEFAULT_SIZE.width),
+    height: z.int().default(DEFAULT_SIZE.height),
+    /** Images generated in one batch; image i uses seed + i. */
+    num_images: z
+      .int()
+      .min(LIMITS.images.min)
+      .max(LIMITS.images.max)
+      .default(LIMITS.images.default),
     /** Omit for a random seed; the seed actually used is always returned. */
     seed: z.int().min(0).max(LIMITS.seedMax).optional(),
   })
-  .strict();
+  .strict()
+  .refine((request) => findSizePreset(request.width, request.height) !== undefined, {
+    message: `Size must be one of ${SIZE_PRESETS.map((preset) => `${preset.width}x${preset.height}`).join(", ")}`,
+    path: ["width"],
+  });
 
 /** What callers send (defaults may be omitted). */
 export type GenerateRequestInput = z.input<typeof GenerateRequestSchema>;
@@ -75,10 +124,22 @@ export const AppliedParamsSchema = z.object({
   guidance_scale: z.number(),
   width: z.int(),
   height: z.int(),
-  /** Diffusers scheduler actually used, e.g. "euler_a". */
+  num_images: z.int(),
+  /** Diffusers scheduler actually used, e.g. "euler". */
   scheduler: z.string(),
+  /** True when the prompt ran past the text encoders' token limit and its tail was ignored. */
+  prompt_truncated: z.boolean().default(false),
+  /** The same, for the negative prompt. */
+  negative_prompt_truncated: z.boolean().default(false),
 });
 export type AppliedParams = z.infer<typeof AppliedParamsSchema>;
+
+export const GeneratedImageSchema = z.object({
+  /** `data:` URL (PNG from the real model, SVG from the mock) or an https URL. */
+  image: z.string(),
+  seed: z.int(),
+});
+export type GeneratedImage = z.infer<typeof GeneratedImageSchema>;
 
 /**
  * A successful response is `application/x-ndjson`: one JSON event per line,
@@ -88,8 +149,10 @@ export type AppliedParams = z.infer<typeof AppliedParamsSchema>;
 export const StreamEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("accepted"),
+    /** The base seed; image i of the batch uses seed + i. */
     seed: z.int(),
     total_steps: z.int(),
+    num_images: z.int(),
     model: z.string(),
   }),
   z.object({
@@ -99,9 +162,8 @@ export const StreamEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("result"),
-    /** `data:` URL (PNG from the real model, SVG from the mock) or an https URL. */
-    image: z.string(),
-    seed: z.int(),
+    /** One entry per generated image, in batch order. */
+    images: z.array(GeneratedImageSchema).min(1),
     params: AppliedParamsSchema,
     timing_ms: z.number(),
     model: z.string(),

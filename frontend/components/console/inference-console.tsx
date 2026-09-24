@@ -7,14 +7,14 @@ import { OutputPanel } from "@/components/console/output-panel";
 import { SessionStrip } from "@/components/console/session-strip";
 import { SiteHeader, type ConnectionStatus } from "@/components/console/site-header";
 import { useGenerator } from "@/hooks/use-generator";
-import { ERROR_CODES, LIMITS, type ImageSize } from "@/lib/contract";
-import { selectedGeneration, type Draft, type Generation, type Status } from "@/lib/console-state";
+import { ERROR_CODES, LIMITS } from "@/lib/contract";
+import { selectedGeneration, type Draft, type Generation, type ImageSize, type Status } from "@/lib/console-state";
 
 const INITIAL_DRAFT: Draft = {
   prompt: "",
   steps: LIMITS.steps.default,
   guidance: LIMITS.guidance.default,
-  size: LIMITS.defaultSize,
+  size: 1024,
   seed: null,
 };
 

@@ -7,21 +7,44 @@ The browser only ever talks to the Next.js route handler at `POST /api/generate`
 When `INFERENCE_API_URL` is unset, that handler serves a built-in mock engine.
 When it is set, the handler validates the request and forwards it to `POST {INFERENCE_API_URL}/generate`, so **the inference service implements exactly this contract**.
 
+## What the model supports
+
+`kumo24/sdxl_nuclear` is a fine-tuned SDXL UNet loaded into the stock `stabilityai/stable-diffusion-xl-base-1.0` pipeline, so every limit below comes from SDXL or from how the fine-tune was trained:
+
+- **Sizes.** SDXL is built for about one megapixel and degrades well below it, so only SDXL-native sizes are accepted.
+  The fine-tune was trained only on 1024x1024 images (NuclearDiffusion paper), so 1024x1024 is the default and the other sizes are offered as experimental.
+- **Prompt length.** SDXL's CLIP text encoders read 77 tokens, 75 of them usable.
+  The pipeline silently drops the rest, so the service reports truncation instead of hiding it.
+- **Scheduler.** The base pipeline's default, `EulerDiscreteScheduler`, reported as `euler`.
+- **Defaults** follow the model card and the paper: 50 steps, guidance 5.0, no negative prompt.
+- **Guidance 1.0** turns classifier-free guidance off in diffusers, so a negative prompt has no effect at that value.
+
 ## Request
 
 `POST /generate` with `Content-Type: application/json`.
 
 | Field | Type | Default | Rules |
 | --- | --- | --- | --- |
-| `prompt` | string | required | Trimmed, 1-500 characters |
-| `negative_prompt` | string | omitted | Trimmed, up to 500 characters |
-| `num_inference_steps` | integer | 30 | 10-50 |
-| `guidance_scale` | number | 7.5 | 1-15 |
-| `width` | integer | 1024 | One of 512, 768, 1024 |
-| `height` | integer | 1024 | One of 512, 768, 1024 |
+| `prompt` | string | required | Trimmed, 1-500 characters. Only the first 75 CLIP tokens reach the model |
+| `negative_prompt` | string | omitted | Trimmed, up to 500 characters, same token window |
+| `num_inference_steps` | integer | 50 | 10-50 |
+| `guidance_scale` | number | 5.0 | 1-15 |
+| `width` x `height` | integers | 1024 x 1024 | One of the pairs below |
+| `num_images` | integer | 1 | 1-4, generated as one batch |
 | `seed` | integer | random | 0-4294967295 (uint32). Omit for a random seed |
 
-Unknown fields are rejected.
+Allowed sizes (all SDXL-native, sides divisible by 64):
+
+| Aspect | `width` x `height` | Status |
+| --- | --- | --- |
+| 1:1 | 1024 x 1024 | Trained resolution |
+| 4:3 | 1152 x 896 | Experimental |
+| 3:4 | 896 x 1152 | Experimental |
+| 3:2 | 1216 x 832 | Experimental |
+| 2:3 | 832 x 1216 | Experimental |
+| 16:9 | 1344 x 768 | Experimental |
+
+Unknown fields and any other size are rejected with `400 ERR_INVALID_REQUEST`.
 The proxy sends `Authorization: Bearer $INFERENCE_API_TOKEN` when that variable is set.
 
 ## Successful response: an NDJSON stream
@@ -33,30 +56,40 @@ Status `200`, `Content-Type: application/x-ndjson`, one JSON object per line:
 3. exactly one terminal event, `result` or `error`.
 
 ```jsonc
-{"type":"accepted","seed":742199304,"total_steps":30,"model":"kumo24/sdxl_nuclear"}
-{"type":"progress","step":1,"total_steps":30}
+{"type":"accepted","seed":742199304,"total_steps":50,"num_images":2,"model":"kumo24/sdxl_nuclear"}
+{"type":"progress","step":1,"total_steps":50}
 // ...
-{"type":"progress","step":30,"total_steps":30}
-{"type":"result","image":"data:image/png;base64,...","seed":742199304,"params":{"prompt":"...","num_inference_steps":30,"guidance_scale":7.5,"width":1024,"height":1024,"scheduler":"euler_a"},"timing_ms":3240,"model":"kumo24/sdxl_nuclear"}
+{"type":"progress","step":50,"total_steps":50}
+{"type":"result","images":[{"image":"data:image/png;base64,...","seed":742199304},{"image":"data:image/png;base64,...","seed":742199305}],"params":{"prompt":"...","num_inference_steps":50,"guidance_scale":5,"width":1024,"height":1024,"num_images":2,"scheduler":"euler","prompt_truncated":false,"negative_prompt_truncated":false},"timing_ms":14100,"model":"kumo24/sdxl_nuclear"}
 ```
 
-- `seed` is always the seed actually used, so a result can be reproduced exactly.
-- `params` echoes the applied parameters plus `scheduler`, the diffusers scheduler that ran (for example `euler_a`).
-- `image` is a `data:` URL (PNG from the model) or an `https` URL if a storage layer is added later.
+- `accepted.seed` is the base seed actually used. Image `i` of a batch uses `(seed + i) mod 2^32`, and each entry in `images` carries its own seed, so any single image can be reproduced exactly with `num_images: 1`.
+- `images` is in batch order and has exactly `num_images` entries. Each `image` is a `data:` URL (PNG from the model) or an `https` URL if a storage layer is added later.
+- `params` echoes the applied parameters plus `scheduler`, the diffusers scheduler that ran (`euler`).
+- `prompt_truncated` / `negative_prompt_truncated` are `true` when that text ran past the 75-token window and its tail was ignored.
+  Compute them with the pipeline's own tokenizer (`len(pipe.tokenizer(text).input_ids) > pipe.tokenizer.model_max_length`); if omitted they default to `false`.
 - A failure after streaming has begun is reported in-band:
 
 ```json
-{"type":"error","code":"ERR_INFERENCE","message":"CUDA out of memory. Try a smaller size."}
+{"type":"error","code":"ERR_INFERENCE","message":"CUDA out of memory. Try fewer images per run."}
 ```
 
-In diffusers, `progress` events map directly onto the pipeline's per-step `callback_on_step_end`.
+In diffusers, `progress` events map directly onto the pipeline's per-step `callback_on_step_end`, and a batch is one pipeline call:
+
+```python
+generators = [torch.Generator("cuda").manual_seed((seed + i) % 2**32) for i in range(num_images)]
+pipe(prompt, negative_prompt=..., num_inference_steps=..., guidance_scale=..., width=..., height=...,
+     num_images_per_prompt=num_images, generator=generators, callback_on_step_end=...)
+```
+
+Enable `pipe.enable_vae_slicing()` so decoding a batch of four 1-megapixel images does not spike VRAM.
 
 ### Simpler alternative for the backend
 
 If streaming is not ready yet, the service may instead answer `200` with a single JSON body:
 
 ```json
-{"image":"data:image/png;base64,...","seed":742199304,"params":{"prompt":"...","num_inference_steps":30,"guidance_scale":7.5,"width":1024,"height":1024,"scheduler":"euler_a"},"timing_ms":3240,"model":"kumo24/sdxl_nuclear"}
+{"images":[{"image":"data:image/png;base64,...","seed":742199304}],"params":{"prompt":"...","num_inference_steps":50,"guidance_scale":5,"width":1024,"height":1024,"num_images":1,"scheduler":"euler","prompt_truncated":false,"negative_prompt_truncated":false},"timing_ms":7050,"model":"kumo24/sdxl_nuclear"}
 ```
 
 The proxy converts it into `accepted` plus `result`.
@@ -81,7 +114,7 @@ How the proxy maps upstream statuses to what the browser sees:
 | unreachable | `502` | `ERR_UPSTREAM` |
 | no response within 115s | `504` | `ERR_TIMEOUT` |
 
-Return `503` with a `Retry-After` header while the model loads; the UI shows it as "Reactor offline" with a retry.
+Return `503` with a `Retry-After` header while the model loads; the UI shows it as "The model is starting up" with a retry.
 
 ## Streaming notes
 

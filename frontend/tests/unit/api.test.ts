@@ -4,9 +4,18 @@ import type { StreamEvent } from "@/lib/contract";
 
 const RESULT: StreamEvent = {
   type: "result",
-  image: "data:image/png;base64,AA==",
-  seed: 5,
-  params: { prompt: "p", num_inference_steps: 2, guidance_scale: 7.5, width: 512, height: 512, scheduler: "euler_a" },
+  images: [{ image: "data:image/png;base64,AA==", seed: 5 }],
+  params: {
+    prompt: "p",
+    num_inference_steps: 2,
+    guidance_scale: 5,
+    width: 1024,
+    height: 1024,
+    num_images: 1,
+    scheduler: "euler",
+    prompt_truncated: false,
+    negative_prompt_truncated: false,
+  },
   timing_ms: 120,
   model: "kumo24/sdxl_nuclear",
 };
@@ -26,7 +35,7 @@ describe("generate", () => {
     const events: string[] = [];
     const fetchImpl = fetchReturning(
       ndjson([
-        { type: "accepted", seed: 5, total_steps: 2, model: "m" },
+        { type: "accepted", seed: 5, total_steps: 2, num_images: 1, model: "m" },
         { type: "progress", step: 1, total_steps: 2 },
         { type: "progress", step: 2, total_steps: 2 },
         RESULT,
@@ -62,13 +71,13 @@ describe("generate", () => {
 
   it("throws the code from an in-stream error event", async () => {
     const fetchImpl = fetchReturning(
-      ndjson([{ type: "accepted", seed: 1, total_steps: 2, model: "m" }, { type: "error", code: "ERR_INFERENCE", message: "oom" }]),
+      ndjson([{ type: "accepted", seed: 1, total_steps: 2, num_images: 1, model: "m" }, { type: "error", code: "ERR_INFERENCE", message: "oom" }]),
     );
     await expect(generate({ prompt: "p" }, { fetchImpl })).rejects.toMatchObject({ code: "ERR_INFERENCE", message: "oom" });
   });
 
   it("reports a stream that ends without a terminal event", async () => {
-    const fetchImpl = fetchReturning(ndjson([{ type: "accepted", seed: 1, total_steps: 2, model: "m" }]));
+    const fetchImpl = fetchReturning(ndjson([{ type: "accepted", seed: 1, total_steps: 2, num_images: 1, model: "m" }]));
     await expect(generate({ prompt: "p" }, { fetchImpl })).rejects.toMatchObject({ code: "ERR_STREAM_INTERRUPTED" });
   });
 

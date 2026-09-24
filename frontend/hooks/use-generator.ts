@@ -70,8 +70,8 @@ export function useGenerator() {
         type: "succeeded",
         generation: {
           id: crypto.randomUUID(),
-          image: result.image,
-          seed: result.seed,
+          image: result.images[0].image,
+          seed: result.images[0].seed,
           params: result.params,
           timingMs: result.timing_ms,
           model: result.model,

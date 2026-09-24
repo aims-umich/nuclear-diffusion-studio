@@ -1,4 +1,7 @@
-import type { AppliedParams, ImageSize } from "@/lib/contract";
+import type { AppliedParams } from "@/lib/contract";
+
+/** The legacy console only renders square SDXL output. */
+export type ImageSize = 1024;
 
 /** What the composer submits. `seed: null` means "pick a random seed". */
 export type Draft = {

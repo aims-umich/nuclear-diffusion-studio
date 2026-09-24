@@ -4,8 +4,8 @@ import { useId, useState, useSyncExternalStore, type RefObject } from "react";
 import { ArrowRight } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { LIMITS, type ImageSize } from "@/lib/contract";
-import type { Draft } from "@/lib/console-state";
+import { LIMITS } from "@/lib/contract";
+import type { Draft, ImageSize } from "@/lib/console-state";
 import { EXAMPLE_PROMPTS } from "@/lib/examples";
 import { randomSeed } from "@/lib/prng";
 import { cn } from "@/lib/utils";
@@ -176,7 +176,7 @@ export function Composer({ draft, onDraftChange, onGenerate, progress, promptRef
               }}
               className="w-full"
             >
-              {LIMITS.sizes.map((size) => (
+              {([1024] as const).map((size) => (
                 <ToggleGroupItem
                   key={size}
                   value={String(size)}

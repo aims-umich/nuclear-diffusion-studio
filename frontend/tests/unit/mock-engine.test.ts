@@ -12,24 +12,48 @@ async function collect(events: AsyncIterable<StreamEvent>) {
 }
 
 const request = (overrides: Record<string, unknown> = {}) =>
-  GenerateRequestSchema.parse({ prompt: "Containment dome at dusk", num_inference_steps: 10, width: 512, height: 512, ...overrides });
+  GenerateRequestSchema.parse({ prompt: "Containment dome at dusk", num_inference_steps: 10, ...overrides });
 
 describe("runMockGeneration", () => {
   it("emits accepted, one progress event per step, then a result", async () => {
     const events = await collect(runMockGeneration(request({ seed: 7 }), "ok", FAST));
     expect(events.map((event) => event.type)).toEqual(["accepted", ...Array(10).fill("progress"), "result"]);
-    expect(events[0]).toMatchObject({ type: "accepted", seed: 7, total_steps: 10 });
+    expect(events[0]).toMatchObject({ type: "accepted", seed: 7, total_steps: 10, num_images: 1 });
     expect(events.filter((event) => event.type === "progress").map((event) => event.step)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
     const result = events.at(-1);
     expect(result).toMatchObject({
       type: "result",
-      seed: 7,
-      params: { prompt: "Containment dome at dusk", num_inference_steps: 10, width: 512, height: 512, scheduler: "euler_a" },
+      images: [{ seed: 7 }],
+      params: {
+        prompt: "Containment dome at dusk",
+        num_inference_steps: 10,
+        width: 1024,
+        height: 1024,
+        num_images: 1,
+        scheduler: "euler",
+        prompt_truncated: false,
+        negative_prompt_truncated: false,
+      },
     });
     if (result?.type !== "result") throw new Error("expected a result");
-    expect(result.image.startsWith("data:image/svg+xml;base64,")).toBe(true);
+    expect(result.images[0].image.startsWith("data:image/svg+xml;base64,")).toBe(true);
     expect(result.timing_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("returns one image per requested image, seeded seed + index", async () => {
+    const events = await collect(runMockGeneration(request({ seed: 4_294_967_294, num_images: 3, width: 1216, height: 832 }), "ok", FAST));
+    const result = events.at(-1);
+    if (result?.type !== "result") throw new Error("expected a result");
+    expect(result.images.map((image) => image.seed)).toEqual([4_294_967_294, 4_294_967_295, 0]);
+    expect(new Set(result.images.map((image) => image.image)).size).toBe(3);
+    expect(result.params).toMatchObject({ width: 1216, height: 832, num_images: 3 });
+  });
+
+  it("reports a prompt that runs past the token window", async () => {
+    const long = "Cutaway of a pressurized-water reactor core, fuel assemblies and control rods, ".repeat(6);
+    const result = (await collect(runMockGeneration(request({ prompt: long.slice(0, 500) }), "ok", FAST))).at(-1);
+    expect(result).toMatchObject({ type: "result", params: { prompt_truncated: true } });
   });
 
   it("picks a random seed when none is given and reports it", async () => {
@@ -58,17 +82,24 @@ describe("runMockGeneration", () => {
 });
 
 describe("renderMockImage", () => {
+  const square = { width: 1024, height: 1024 };
+
   it("is deterministic in seed and prompt", () => {
-    const a = renderMockImage({ seed: 42, prompt: "PWR core", size: 1024 });
-    expect(renderMockImage({ seed: 42, prompt: "PWR core", size: 1024 })).toBe(a);
-    expect(renderMockImage({ seed: 43, prompt: "PWR core", size: 1024 })).not.toBe(a);
-    expect(renderMockImage({ seed: 42, prompt: "graphite lattice", size: 1024 })).not.toBe(a);
+    const a = renderMockImage({ seed: 42, prompt: "PWR core", ...square });
+    expect(renderMockImage({ seed: 42, prompt: "PWR core", ...square })).toBe(a);
+    expect(renderMockImage({ seed: 43, prompt: "PWR core", ...square })).not.toBe(a);
+    expect(renderMockImage({ seed: 42, prompt: "graphite lattice", ...square })).not.toBe(a);
   });
 
   it("labels itself as mock output at the requested size", () => {
-    const svg = renderMockImage({ seed: 1, prompt: "x", size: 768 });
-    expect(svg).toContain('width="768" height="768"');
+    const svg = renderMockImage({ seed: 1, prompt: "x", ...square });
+    expect(svg).toContain('width="1024" height="1024" viewBox="0.0 0.0 1024.0 1024.0"');
     expect(svg).toContain("MOCK OUTPUT");
+  });
+
+  it("widens the view around the core for landscape sizes", () => {
+    const svg = renderMockImage({ seed: 1, prompt: "x", width: 1344, height: 768 });
+    expect(svg).toContain('width="1344" height="768" viewBox="-384.0 0.0 1792.0 1024.0"');
   });
 });
 

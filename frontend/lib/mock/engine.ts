@@ -4,10 +4,12 @@ import {
   ERROR_CODES,
   MODEL,
   MOCK_SCENARIOS,
+  seedForImage,
   type GenerateRequest,
   type MockScenario,
   type StreamEvent,
 } from "@/lib/contract";
+import { exceedsPromptTokens } from "@/lib/prompt-tokens";
 import { createRng, randomSeed } from "@/lib/prng";
 import { renderMockImage, svgToDataUrl } from "@/lib/mock/render";
 
@@ -19,9 +21,9 @@ import { renderMockImage, svgToDataUrl } from "@/lib/mock/render";
  * A10G, so every UI state is exercised without a backend.
  */
 
-/** Approximate per-step latency on a warm A10G, by output size. */
-const STEP_MS: Record<number, number> = { 512: 38, 768: 68, 1024: 104 };
-const SCHEDULER = "euler_a";
+/** Approximate per-step latency for one 1024x1024 image on a warm A10G. */
+const STEP_MS_PER_MEGAPIXEL_IMAGE = 104;
+const ONE_MEGAPIXEL = 1024 * 1024;
 
 export type MockConfig = {
   /** Probability [0, 1] that a request hits a simulated cold start. */
@@ -68,10 +70,12 @@ export async function* runMockGeneration(
   const seed = request.seed ?? randomSeed();
   const total = request.num_inference_steps;
   const jitter = createRng(seed);
-  const baseStepMs = (STEP_MS[request.width] ?? STEP_MS[1024]) * (scenario === "slow" ? 6 : 1);
+  // A batch runs in one denoising loop, so each step costs roughly one image's step per image.
+  const pixels = (request.width * request.height) / ONE_MEGAPIXEL;
+  const baseStepMs = STEP_MS_PER_MEGAPIXEL_IMAGE * pixels * request.num_images * (scenario === "slow" ? 6 : 1);
   const failAt = scenario === "inference-error" ? Math.max(1, Math.floor(total * 0.4)) : -1;
 
-  yield { type: "accepted", seed, total_steps: total, model: MODEL.id };
+  yield { type: "accepted", seed, total_steps: total, num_images: request.num_images, model: MODEL.id };
 
   for (let step = 1; step <= total; step++) {
     await sleep((baseStepMs * (0.85 + jitter() * 0.3)) / config.speed, signal);
@@ -86,11 +90,14 @@ export async function* runMockGeneration(
     yield { type: "progress", step, total_steps: total };
   }
 
-  const svg = renderMockImage({ seed, prompt: request.prompt, size: request.width });
+  const images = Array.from({ length: request.num_images }, (_, index) => {
+    const imageSeed = seedForImage(seed, index);
+    const svg = renderMockImage({ seed: imageSeed, prompt: request.prompt, width: request.width, height: request.height });
+    return { image: svgToDataUrl(svg), seed: imageSeed };
+  });
   yield {
     type: "result",
-    image: svgToDataUrl(svg),
-    seed,
+    images,
     params: {
       prompt: request.prompt,
       ...(request.negative_prompt ? { negative_prompt: request.negative_prompt } : {}),
@@ -98,7 +105,10 @@ export async function* runMockGeneration(
       guidance_scale: request.guidance_scale,
       width: request.width,
       height: request.height,
-      scheduler: SCHEDULER,
+      num_images: request.num_images,
+      scheduler: MODEL.scheduler,
+      prompt_truncated: exceedsPromptTokens(request.prompt),
+      negative_prompt_truncated: request.negative_prompt ? exceedsPromptTokens(request.negative_prompt) : false,
     },
     timing_ms: Math.round(performance.now() - started),
     model: MODEL.id,

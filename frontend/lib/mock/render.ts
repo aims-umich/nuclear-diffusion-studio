@@ -20,9 +20,10 @@ type Core = { cells: Cell[]; cellSize: number };
 export function renderMockImage(options: {
   seed: number;
   prompt: string;
-  size: number;
+  width: number;
+  height: number;
 }): string {
-  const { seed, prompt, size } = options;
+  const { seed, prompt, width, height } = options;
   const promptHash = hashString(prompt.trim().toLowerCase());
   const rng = createRng(seed ^ promptHash);
   const layout = promptHash % 2 === 0 ? "square" : "hex";
@@ -31,16 +32,26 @@ export function renderMockImage(options: {
   const glow = 0.1 + rng() * 0.08;
   const cellMarkup = cells.map((cell) => renderCell(cell, cellSize)).join("");
 
+  // The core is drawn in a 1024 square; non-square outputs widen or heighten the view around it.
+  const aspect = width / height;
+  const view = {
+    width: VIEWBOX * Math.max(1, aspect),
+    height: VIEWBOX * Math.max(1, 1 / aspect),
+  };
+  const x = CENTER - view.width / 2;
+  const y = CENTER - view.height / 2;
+  const box = `${x.toFixed(1)} ${y.toFixed(1)} ${view.width.toFixed(1)} ${view.height.toFixed(1)}`;
+
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${VIEWBOX} ${VIEWBOX}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${box}">`,
     "<defs>",
     `<radialGradient id="g" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="${FG}" stop-opacity="${glow.toFixed(3)}"/><stop offset="1" stop-color="${FG}" stop-opacity="0"/></radialGradient>`,
     "</defs>",
-    `<rect width="${VIEWBOX}" height="${VIEWBOX}" fill="#0e0e0f"/>`,
+    `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${view.width.toFixed(1)}" height="${view.height.toFixed(1)}" fill="#0e0e0f"/>`,
     `<circle cx="${CENTER}" cy="${CENTER}" r="470" fill="url(#g)"/>`,
     renderRings(),
     `<g transform="rotate(${rotation} ${CENTER} ${CENTER})">${cellMarkup}</g>`,
-    renderLabel(),
+    renderLabel(x, y + view.height),
     "</svg>",
   ].join("");
 }
@@ -141,9 +152,9 @@ function renderRings() {
   ].join("");
 }
 
-function renderLabel() {
+function renderLabel(left: number, bottom: number) {
   // The UI shows the seed in its own badge; the image only needs to say it is not model output.
-  return `<text x="40" y="${VIEWBOX - 40}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" letter-spacing="3" fill="${FG}" fill-opacity="0.45">MOCK OUTPUT</text>`;
+  return `<text x="${(left + 40).toFixed(1)}" y="${(bottom - 40).toFixed(1)}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" letter-spacing="3" fill="${FG}" fill-opacity="0.45">MOCK OUTPUT</text>`;
 }
 
 export function svgToDataUrl(svg: string): string {
