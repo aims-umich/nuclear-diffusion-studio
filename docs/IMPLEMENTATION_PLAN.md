@@ -314,13 +314,16 @@ The original `Inference Console.dc.html` stays in that project as the superseded
 **Layout**
 
 - **Left sidebar:** New thread, Explore examples, and the thread history (named after each thread's first prompt, grouped Today / Previous 7 days / Older, with delete and undo).
-  The footer shows the model, a status light, a Mock badge in mock mode, and links to the paper and model card.
+  The footer shows the model, a status light, links to the paper and model card, and a Mock badge in mock mode.
   It collapses to an icon rail, and becomes a drawer below 860px.
 - **Center:** a chat-like feed of generation turns (prompt, settings, 1-4 images, Regenerate and Edit prompt) above a pinned composer.
   Enter sends and Shift+Enter adds a line.
-  A new thread shows the Explore page: example prompts filtered by category.
+  A new thread shows the Explore page: a model-neutral intro grounded in the paper, then example prompts filtered by category.
 - **Right, "Run settings":** model card, aspect ratio, images per run, steps, guidance, and a collapsed Advanced group (seed, negative prompt, read-only scheduler).
   Inline from 1200px, a sheet below.
+  The model card opens **Models**, a panel over the right edge listing each model (`lib/models.ts`) with its description, input and output, training data, limitations, release date, license, and links.
+  Every fact there comes from the paper or the Hugging Face card.
+  With one model, requests do not name one; a second model adds a `model` field to the contract.
 - **Lightbox:** full-size view with arrow keys through a batch.
 
 **Art direction**

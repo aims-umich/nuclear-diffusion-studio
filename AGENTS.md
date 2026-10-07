@@ -20,6 +20,7 @@ The plan lives in `docs/IMPLEMENTATION_PLAN.md`; the contract is `docs/API.md` a
 - `frontend/` - Next.js 16 (App Router) + TypeScript + Tailwind v4 + shadcn/ui (Radix). Built first.
   - `app/api/generate/route.ts` - the one seam: mock engine when `INFERENCE_API_URL` is unset, proxy when set.
   - `lib/contract.ts` - the frozen request/stream contract (zod), shared by client, mock, and proxy.
+  - `lib/models.ts` - the models shown in the Models panel: names and card facts, sourced only from the paper and the Hugging Face card.
   - `lib/mock/` - deterministic mock engine and procedural placeholder renderer.
   - `lib/server/` - NDJSON response helpers and the upstream proxy.
   - `lib/studio-state.ts` - the pure studio reducer (threads, turns, the running generation); `lib/storage.ts` - IndexedDB and localStorage persistence.
