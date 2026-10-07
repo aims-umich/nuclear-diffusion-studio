@@ -2,3 +2,6 @@
 .env
 .env.*
 !.env.example
+
+# python bytecode (backend/ has its own .gitignore; this covers deploy/)
+__pycache__/
