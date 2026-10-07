@@ -48,9 +48,7 @@ export function Explore({ onPick }: { onPick: (example: Example) => void }) {
               onClick={() => onPick(example)}
               className="group relative block aspect-4/5 w-full overflow-hidden rounded-[14px] border border-line bg-hatch text-left transition-colors hover:border-white/30"
             >
-              {example.thumbnail && (
-                <Image src={example.thumbnail} alt="" fill unoptimized className="object-cover" sizes="240px" />
-              )}
+              <Image src={example.thumbnail} alt="" fill unoptimized className="object-cover" sizes="240px" />
               <span className="absolute inset-x-0 bottom-0 flex flex-col bg-linear-to-t from-black/90 to-transparent px-3.5 pt-11 pb-3.5">
                 <span className="text-sm leading-snug font-medium text-fg">{example.title}</span>
                 <span className="mt-0.5 text-xs text-fg-muted">{example.category}</span>
