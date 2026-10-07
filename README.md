@@ -9,8 +9,9 @@ The settings offered are the ones the model actually supports; see "What the mod
 
 ## Status
 
-The frontend is complete and runs against a **mock inference layer**, which returns a labelled procedural placeholder instead of model output.
-The Python GPU inference service is the next track; the UI switches to it with one environment variable and no code changes.
+The studio runs end to end against the real model.
+The inference service in `backend/` is deployed on [Modal](https://modal.com) as a scale-to-zero GPU app (`deploy/modal_app.py`): it costs nothing while idle, and a request after a quiet spell waits about 30 seconds while a GPU wakes up.
+Without `INFERENCE_API_URL`, the frontend falls back to a built-in **mock inference layer** that returns labelled placeholder images, so the UI can be developed with no GPU at all.
 
 ## Quick start
 
@@ -25,14 +26,15 @@ To see the failure states, add `?mock=cold-start` or `?mock=inference-error` to 
 
 ## Connecting the real model
 
-Build the inference service to the contract in [`docs/API.md`](docs/API.md), then set:
+Set these in `frontend/.env.local` (gitignored; ask a maintainer for the token):
 
 ```bash
-INFERENCE_API_URL=https://your-inference-service.example.com
-INFERENCE_API_TOKEN=optional-bearer-token
+INFERENCE_API_URL=https://jeremoon--nuclear-diffusion-studio-inference-web.modal.run
+INFERENCE_API_TOKEN=<Modal proxy token, as id.secret>
 ```
 
 The `/api/generate` route handler then proxies to that service instead of serving the mock.
+The service implements the contract in [`docs/API.md`](docs/API.md); `AGENTS.md` lists the backend's test, deploy, and benchmark commands.
 
 ## Development
 

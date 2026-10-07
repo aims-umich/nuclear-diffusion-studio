@@ -15,6 +15,10 @@ Users type a prompt, the fine-tuned model generates a nuclear-domain image, and 
 > Next: Phase 4 (create the GitHub remote and deploy to Vercel), which needs Jeremy's go-ahead, then Track B.
 > Deviations from the original text are recorded inline as **As built** notes.
 
+> **Status (2026-10-07):** Track B phases 5-7 are done locally.
+> The inference service (`backend/`) is deployed on Modal at `https://jeremoon--nuclear-diffusion-studio-inference-web.modal.run`, and `npm run dev` with `frontend/.env.local` runs the studio against the real model end to end.
+> Still open: Phase 4 (GitHub remote and Vercel), after which `INFERENCE_API_URL` and `INFERENCE_API_TOKEN` go into Vercel as Sensitive env vars.
+
 > **GPU host (decided 2026-09-23): Modal.** Serverless, scale-to-zero, billed per second, and the Starter plan's $30/month of free compute should cover lab-demo traffic.
 > Section 5 records the decision and the alternatives considered; Sections 6, 8, 9, 10, and 11 carry the Modal-specific design.
 
@@ -200,11 +204,11 @@ If hosting ever changes (for example to Jetstream2), the same package runs under
 
 ```python
 @app.cls(
-    gpu="A10",                        # benchmark L4 / A10 / L40S in Phase 5, keep the cheapest per image
-    image=image,                      # weights downloaded at image build time, pinned revisions
+    gpu=["L4", "A10", "L40S"],        # cheapest per visit first; fall back instead of waiting for capacity
+    image=image,                      # weights baked in at build time, pinned revisions
     secrets=[modal.Secret.from_name("nuclear-diffusion-studio")],  # INFERENCE_API_TOKEN
     enable_memory_snapshot=True,
-    scaledown_window=180,             # seconds idle before scale-to-zero; covers a user iterating on prompts
+    scaledown_window=60,              # seconds idle before scale-to-zero; covers a user iterating on prompts
     min_containers=0,                 # always 0: serverless only, never a warm GPU
     max_containers=2,                 # cost ceiling; excess requests queue at Modal
     timeout=300,
@@ -212,30 +216,39 @@ If hosting ever changes (for example to Jetstream2), the same package runs under
 class Inference:
     @modal.enter(snap=True)
     def load(self):                   # imports + weights into CPU RAM, captured in the memory snapshot
-        self.pipeline = load_pipeline(device="cpu")
+        self.engine = SDXLEngine.load(Path(WEIGHTS), device="cpu")
 
     @modal.enter(snap=False)
     def to_gpu(self):                 # runs on every container start, after the snapshot restore
-        self.pipeline.to("cuda")
+        self.engine.to("cuda")
 
-    @modal.asgi_app()
+    @modal.asgi_app(requires_proxy_auth=True)
     def web(self):
-        return create_app(self.pipeline)   # the same FastAPI app `uvicorn` serves locally
+        return create_app(self.engine, token=..., limiter=...)  # the same FastAPI app `uvicorn` serves
 ```
 
-- **Weights in the image.** Downloading at image build time (`Image.run_function`) makes cold starts independent of Hugging Face availability and bandwidth, and ties each deploy to one exact model revision.
+> **As built (2026-10-07):** `deploy/benchmark.py` measured one 1024x1024 image at 50 steps in 21.1s on an L4, 15.8s on an A10, and 6.1s on an L40S (batch of four: 88s, 60s, 23s).
+> The L40S is cheapest per image, but a visit's cost is dominated by the idle scale-down tail billed at the GPU rate, so the L4 is cheapest per visit unless one visit makes more than about 19 images (Section 11).
+> L4 capacity is sometimes scarce: one cold start waited over two minutes for an L4, so the class lists A10 and L40S as fallbacks.
+> The fine-tuned UNet is published as a 10 GB fp32 checkpoint; the image build stores it once in fp16, which is what every load casts it to anyway.
+
+- **Weights in the image.** Downloading at image build time (`backend/app/weights.py`, run as an image build step) makes cold starts independent of Hugging Face availability and bandwidth, and ties each deploy to one exact model revision.
 - **Memory snapshots.** CPU snapshots are stable and restore imports plus CPU-resident weights; only the host-to-GPU copy runs on each cold start.
   GPU snapshots (`experimental_options={"enable_gpu_snapshot": True}`) would skip that copy too, but they are alpha; revisit once they stabilize.
 - **One request per container.** The class takes no `@modal.concurrent`, so each container serves one generation at a time and Modal queues and scales the rest up to `max_containers`.
   The in-process GPU lock stays anyway, so plain `uvicorn` runs behave the same.
-- **Auth.** A Modal web endpoint URL is public, so the FastAPI app requires `Authorization: Bearer $INFERENCE_API_TOKEN` (already sent by the proxy) and answers `401` otherwise.
+- **Auth.** A Modal web endpoint URL is public, so it uses Modal proxy auth (`requires_proxy_auth=True`): Modal checks the token at its edge, so a request without it is rejected before any GPU container starts.
+  `INFERENCE_API_TOKEN` is that proxy token as `<id>.<secret>`, which the proxy already sends as `Authorization: Bearer`; the FastAPI app checks the same token again, so it stays protected under plain uvicorn.
   The browser never calls the backend directly, so CORS is not needed.
-- **Timeouts.** Modal cuts HTTP requests off at 150s with a `303` redirect; the proxy already gives up at 115s, so that limit is never reached.
+- **Timeouts.** Modal answers `303` if a request has not started responding within 150s; the proxy gives up waiting for a response at 115s, so that limit is never reached.
+  Once the stream has started, it runs to its terminal event (up to the route's 300s limit).
 
 **How a cold start surfaces on Modal**
 
 A scale-from-zero request does not get a `503`: Modal holds it until a container is up, then our code runs and streams `accepted` as usual.
-From the browser's side, a cold start is a longer wait before `accepted` (target under 30s with snapshots).
+From the browser's side, a cold start is a longer wait before `accepted`: about 30s measured with snapshots (most of it restoring the snapshot and creating one for a new worker type), longer when Modal has to wait for GPU capacity.
+After 4s without `accepted`, the UI says the GPU is waking and that the first run can take up to a minute (`?mock=waking` reproduces it).
+The first request after each deploy also builds the memory snapshot; send one yourself after deploying so a visitor does not pay for it.
 The contract does not change: `503 ERR_COLD_START` stays valid for other hosts, and the UI treats a slow `accepted` as a UI-only concern (Phase 7).
 
 **API contract (frozen)**
@@ -442,7 +455,7 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 
 ### Track B - Inference backend (wire in when the model/GPU is ready)
 
-**Phase 5 - Modal setup & model validation (half a day)**
+**Phase 5 - Modal setup & model validation (half a day)** - done 2026-10-07 (the Modal for Academics application is still open)
 
 - Create the Modal workspace on the Starter plan, set a **workspace budget** of $30/month and a **spend limit** of $0 so the free credit is the ceiling (done 2026-10-07), and create the `nuclear-diffusion-studio` secret with a generated `INFERENCE_API_TOKEN`.
 - Ask the PI to apply to **Modal for Academics** (up to $10k in credits; faculty, postdocs, and PhD students are eligible), so traffic growth never blocks on budget.
@@ -450,7 +463,7 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 - Benchmark L4, A10, and L40S: seconds per image at 1024 and 50 steps (and a batch of 4), cold-start time with snapshots, and cost per image. Keep the cheapest GPU whose warm single-image latency stays under about 15s.
 - Record the pinned model revisions.
 
-**Phase 6 - Inference service (1-2 days)**
+**Phase 6 - Inference service (1-2 days)** - done 2026-10-07
 
 - `backend/` FastAPI app with `POST /generate`, pydantic validation matching the frozen contract, warm singleton pipeline, GPU lock, bearer-token auth.
 - Stream NDJSON from `callback_on_step_end`; return a base64 PNG, the seed actually used, and timing.
@@ -458,7 +471,7 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 - pytest suite against a fake pipeline, so contract and auth tests run on CPU in CI.
 - `deploy/modal_app.py` per Section 6; iterate with `modal serve`, then point a local `npm run dev` at the dev URL for a real end-to-end run.
 
-**Phase 7 - Deploy backend & flip the switch (1 day)**
+**Phase 7 - Deploy backend & flip the switch (1 day)** - done 2026-10-07 locally; the Vercel env vars wait on Phase 4
 
 - `modal deploy deploy/modal_app.py` for a stable HTTPS endpoint.
 - Set `INFERENCE_API_URL` and `INFERENCE_API_TOKEN` in Vercel to flip `/api/generate` from **mock to proxy** - no client-side changes.
@@ -492,15 +505,17 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 
 ## 11. Cost notes
 
-Modal list prices (September 2026): L4 $0.000222/s, A10 $0.000306/s, L40S $0.000542/s.
+Modal list prices (October 2026): L4 $0.000222/s, A10 $0.000306/s, L40S $0.000542/s, plus about $0.0000222/s for the ~10 GiB of container memory.
+Times below are measured (`deploy/benchmark.py`, 2026-10-07).
 
 | Item | Approximate cost |
 | --- | --- |
-| One warm image (A10, 1024, 50 steps, ~12s) | $0.004 |
-| One visit (cold start + a few images + 180s scale-down tail) | $0.05-0.10 |
+| One warm image (1024, 50 steps): L4 21s / A10 16s / L40S 6s | $0.0047 / $0.0048 / $0.0033 |
+| One visit (~30s cold start + 3 images + 60s scale-down tail) on L4 | about $0.035 |
+| The same visit when it falls back to an A10 / L40S | about $0.04 / $0.06 |
 | Idle day | $0 |
-| Starter plan free compute | $30/month, roughly 300-600 visits |
-| One container kept warm 24/7 (A10) | about $800/month - never done (decided 2026-10-07) |
+| Starter plan free compute | $30/month, roughly 700-900 such visits |
+| One container kept warm 24/7 (L4) | about $630/month - never done (decided 2026-10-07) |
 
 - **Levers, in order of impact:** the scale-down window (idle tail billed at the GPU rate), cold-start time (snapshots), then GPU choice.
 - **If traffic outgrows the free tier:** Modal for Academics credits first; if usage becomes steady enough that always-on is cheaper, move the same `backend/` package to a free **Jetstream2** GPU VM through an NSF ACCESS Explore allocation (1-page proposal, faculty or grad-student PI) and point `INFERENCE_API_URL` at it.

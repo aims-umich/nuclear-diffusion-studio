@@ -25,7 +25,13 @@ The plan lives in `docs/IMPLEMENTATION_PLAN.md`; the contract is `docs/API.md` a
   - `lib/studio-state.ts` - the pure studio reducer (threads, turns, the running generation); `lib/storage.ts` - IndexedDB and localStorage persistence.
   - `components/studio/` - the studio UI: sidebar, feed, composer, run settings, explore, lightbox.
   - `tests/unit/` (Vitest) and `tests/e2e/` (Playwright).
-- `backend/` - FastAPI + diffusers inference service, deployed on Modal via `deploy/modal_app.py`. Not built yet (Track B).
+- `backend/` - FastAPI + diffusers inference service (Track B), runnable under plain uvicorn on any GPU host.
+  - `app/main.py` - `create_app(engine, token, limiter)`: `POST /generate`, NDJSON streaming, bearer auth, per-IP rate limit.
+  - `app/pipeline.py` - the real engine (fine-tuned UNet in the stock SDXL pipeline); `app/weights.py` - pinned revisions and the build-time download.
+  - `requirements.in` -> `requirements.txt` (compiled lock, installed in the Modal image); `requirements-dev.txt` - local tooling, no torch.
+  - `tests/` - pytest against a fake engine, CPU only.
+- `deploy/` - `modal_app.py` wraps `backend/` as a scale-to-zero Modal app; `benchmark.py` times candidate GPUs.
+  Deployed at `https://jeremoon--nuclear-diffusion-studio-inference-web.modal.run` (Modal proxy auth: requests without the token never reach a GPU).
 
 ## Commands
 
@@ -34,6 +40,15 @@ Run from `frontend/`:
 - `npm run dev` - dev server on :3000. Append `?mock=cold-start`, `?mock=waking`, `?mock=inference-error`, or `?mock=slow` to the URL to force a mock scenario.
 - `npm run check` - typecheck, lint, unit tests, then E2E. Run it before calling work done.
 - `npm run test` / `npm run test:e2e` - either suite alone. E2E builds and serves production on :3200 and runs desktop Chromium, desktop WebKit, and a mobile viewport.
+
+With `INFERENCE_API_URL` and `INFERENCE_API_TOKEN` in `frontend/.env.local`, `npm run dev` uses the real model on Modal; remove `INFERENCE_API_URL` to go back to the mock.
+
+Run from the project root, with `backend/.venv` (`python3 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements-dev.txt`):
+
+- `backend/.venv/bin/python -m pytest backend` - the backend suite (CPU, no GPU or torch needed).
+- `backend/.venv/bin/modal deploy deploy/modal_app.py` - deploy. Then send one request yourself: the first one after a deploy builds the memory snapshot.
+- `backend/.venv/bin/modal run deploy/benchmark.py` - time L4, A10 and L40S on the real pipeline (spends a few cents of credit).
+- After editing `backend/requirements.in`: `backend/.venv/bin/uv pip compile backend/requirements.in -o backend/requirements.txt --python-version 3.12 --python-platform x86_64-manylinux_2_28`.
 
 ## Rules
 
