@@ -94,6 +94,20 @@ test.describe("studio", () => {
     await expect(status(page)).toHaveText("Ready");
   });
 
+  test("explains the wait while a sleeping GPU wakes up", async ({ page }) => {
+    await page.goto("/?mock=waking");
+    await prompt(page).fill("Containment dome at dusk");
+    await prompt(page).press("Enter");
+
+    await expect(progress(page)).toHaveAttribute("aria-valuetext", "Starting");
+    await expect(progress(page)).toHaveAttribute("aria-valuetext", "Waking the GPU");
+    const hint = page.getByText("The GPU sleeps when idle, so the first run can take up to a minute.");
+    await expect(hint).toBeVisible();
+
+    await expect(results(page)).toHaveCount(1, { timeout: 30_000 });
+    await expect(hint).toHaveCount(0);
+  });
+
   test("generates a batch at an experimental size, one seed per image", async ({ page }) => {
     await page.goto("/");
     const panel = await settings(page);

@@ -31,7 +31,7 @@ The plan lives in `docs/IMPLEMENTATION_PLAN.md`; the contract is `docs/API.md` a
 
 Run from `frontend/`:
 
-- `npm run dev` - dev server on :3000. Append `?mock=cold-start`, `?mock=inference-error`, or `?mock=slow` to the URL to force a mock scenario.
+- `npm run dev` - dev server on :3000. Append `?mock=cold-start`, `?mock=waking`, `?mock=inference-error`, or `?mock=slow` to the URL to force a mock scenario.
 - `npm run check` - typecheck, lint, unit tests, then E2E. Run it before calling work done.
 - `npm run test` / `npm run test:e2e` - either suite alone. E2E builds and serves production on :3200 and runs desktop Chromium, desktop WebKit, and a mobile viewport.
 

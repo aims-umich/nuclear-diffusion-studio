@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { GenerateRequestSchema, type StreamEvent } from "@/lib/contract";
-import { mockConfigFromEnv, parseScenario, pickScenario, runMockGeneration, type MockConfig } from "@/lib/mock/engine";
+import {
+  WAKING_DELAY_MS,
+  mockConfigFromEnv,
+  parseScenario,
+  pickScenario,
+  runMockGeneration,
+  type MockConfig,
+} from "@/lib/mock/engine";
 import { renderMockImage } from "@/lib/mock/render";
 
 const FAST: MockConfig = { coldStartRate: 0, errorRate: 0, speed: 1000 };
@@ -67,6 +74,19 @@ describe("runMockGeneration", () => {
     expect(events.filter((event) => event.type === "progress")).toHaveLength(3);
   });
 
+  it("holds back accepted while the GPU wakes, then runs normally", async () => {
+    const speed = 100;
+    const started = performance.now();
+    const events = runMockGeneration(request({ seed: 7 }), "waking", { ...FAST, speed })[Symbol.asyncIterator]();
+
+    const accepted = await events.next();
+    expect(performance.now() - started).toBeGreaterThanOrEqual(WAKING_DELAY_MS / speed - 5);
+    expect(accepted.value).toMatchObject({ type: "accepted", seed: 7 });
+    const rest = [];
+    for (let next = await events.next(); !next.done; next = await events.next()) rest.push(next.value.type);
+    expect(rest).toEqual([...Array(10).fill("progress"), "result"]);
+  });
+
   it("stops when the request is aborted", async () => {
     const controller = new AbortController();
     const events: StreamEvent[] = [];
@@ -118,6 +138,7 @@ describe("scenario selection", () => {
 
   it("parses only known scenario names", () => {
     expect(parseScenario("cold-start")).toBe("cold-start");
+    expect(parseScenario("waking")).toBe("waking");
     expect(parseScenario("meltdown")).toBeNull();
     expect(parseScenario(null)).toBeNull();
   });

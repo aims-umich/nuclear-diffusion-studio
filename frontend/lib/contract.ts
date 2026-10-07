@@ -205,5 +205,10 @@ export const NDJSON_CONTENT_TYPE = "application/x-ndjson";
 
 /** Header used to force a mock scenario (ignored when proxying). */
 export const MOCK_SCENARIO_HEADER = "x-nd-mock-scenario";
-export const MOCK_SCENARIOS = ["ok", "cold-start", "inference-error", "slow"] as const;
+/**
+ * `waking` holds back `accepted` the way a serverless GPU host (Modal) holds a
+ * request while a container starts from zero; `cold-start` is the 503 a host
+ * that refuses the request instead would send.
+ */
+export const MOCK_SCENARIOS = ["ok", "cold-start", "waking", "inference-error", "slow"] as const;
 export type MockScenario = (typeof MOCK_SCENARIOS)[number];

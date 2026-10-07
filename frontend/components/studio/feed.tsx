@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Copy, Download, Info, Maximize2, Pencil, RefreshCw, TriangleAlert, WandSparkles, X } from "lucide-react";
 import { ERROR_CODES, sizePresetById, type GeneratedImage } from "@/lib/contract";
@@ -66,30 +67,7 @@ function TurnView({ turn, busy, ...actions }: TurnActions & { turn: Turn; busy: 
 
       {turn.status === "error" && turn.failure && <ErrorCard turn={turn} busy={busy} onRetry={() => actions.onRetry(turn)} />}
 
-      {turn.status === "generating" && (
-        <>
-          <div
-            role="progressbar"
-            aria-label="Generation progress"
-            aria-valuemin={0}
-            aria-valuemax={turn.totalSteps}
-            aria-valuenow={turn.step}
-            aria-valuetext={turn.step === 0 ? "Starting" : `Step ${turn.step} of ${turn.totalSteps}`}
-            className={gridClass(request.numImages, size.width, size.height)}
-          >
-            {Array.from({ length: request.numImages }, (_, index) => (
-              <DenoisingTile key={index} turn={turn} aspect={`${size.width} / ${size.height}`} />
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            <TurnButton onClick={actions.onCancel}>
-              <X aria-hidden />
-              Cancel
-              <kbd className="font-mono text-[11px] text-fg-subtle">Esc</kbd>
-            </TurnButton>
-          </div>
-        </>
-      )}
+      {turn.status === "generating" && <Generating turn={turn} onCancel={actions.onCancel} />}
 
       {turn.status === "done" && params && (
         <>
@@ -183,10 +161,71 @@ function ImageTile(props: {
 }
 
 /**
+ * With no `accepted` after this long, the GPU is almost certainly starting from
+ * zero: the serverless host holds the request until a container is up.
+ */
+const WAKING_HINT_MS = 4000;
+
+function Generating({ turn, onCancel }: { turn: Turn; onCancel: () => void }) {
+  const { request } = turn;
+  const size = sizePresetById(request.sizeId);
+  const waking = useHeldFor(turn.seed === null, WAKING_HINT_MS);
+  const label = waking
+    ? "Waking the GPU"
+    : turn.step === 0
+      ? "Starting"
+      : turn.step >= turn.totalSteps
+        ? "Decoding"
+        : "Denoising";
+
+  return (
+    <>
+      <div
+        role="progressbar"
+        aria-label="Generation progress"
+        aria-valuemin={0}
+        aria-valuemax={turn.totalSteps}
+        aria-valuenow={turn.step}
+        aria-valuetext={turn.step === 0 ? label : `Step ${turn.step} of ${turn.totalSteps}`}
+        className={gridClass(request.numImages, size.width, size.height)}
+      >
+        {Array.from({ length: request.numImages }, (_, index) => (
+          <DenoisingTile key={index} turn={turn} label={label} aspect={`${size.width} / ${size.height}`} />
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <TurnButton onClick={onCancel}>
+          <X aria-hidden />
+          Cancel
+          <kbd className="font-mono text-[11px] text-fg-subtle">Esc</kbd>
+        </TurnButton>
+        {waking && (
+          <p className="text-[13px] text-fg-muted">The GPU sleeps when idle, so the first run can take up to a minute.</p>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** True once `condition` has held for `ms`. */
+function useHeldFor(condition: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    if (!condition) return;
+    const timer = setTimeout(() => setHeld(true), ms);
+    return () => {
+      clearTimeout(timer);
+      setHeld(false);
+    };
+  }, [condition, ms]);
+  return condition && held;
+}
+
+/**
  * The in-progress image: Cherenkov-blue light rises through the frame as the
  * denoising steps advance, standing in for a progress bar.
  */
-function DenoisingTile({ turn, aspect }: { turn: Turn; aspect: string }) {
+function DenoisingTile({ turn, label, aspect }: { turn: Turn; label: string; aspect: string }) {
   const percent = progressPercent(turn.step, turn.totalSteps);
   return (
     <div
@@ -208,7 +247,7 @@ function DenoisingTile({ turn, aspect }: { turn: Turn; aspect: string }) {
           {turn.step}
           <span className="text-sm text-fg-muted"> / {turn.totalSteps}</span>
         </div>
-        <div className="mt-0.5 text-[12.5px] text-fg-soft">{turn.step === 0 ? "Starting" : "Denoising"}</div>
+        <div className="mt-0.5 text-[12.5px] text-fg-soft">{label}</div>
       </div>
     </div>
   );

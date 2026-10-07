@@ -60,6 +60,9 @@ export function pickScenario(
 
 export const COLD_START_RETRY_AFTER_S = 20;
 
+/** How long a `waking` request waits before `accepted`, at MOCK_SPEED 1: a measured Modal cold start. */
+export const WAKING_DELAY_MS = 30_000;
+
 export async function* runMockGeneration(
   request: GenerateRequest,
   scenario: Exclude<MockScenario, "cold-start">,
@@ -75,6 +78,7 @@ export async function* runMockGeneration(
   const baseStepMs = STEP_MS_PER_MEGAPIXEL_IMAGE * pixels * request.num_images * (scenario === "slow" ? 6 : 1);
   const failAt = scenario === "inference-error" ? Math.max(1, Math.floor(total * 0.4)) : -1;
 
+  if (scenario === "waking") await sleep(WAKING_DELAY_MS / config.speed, signal);
   yield { type: "accepted", seed, total_steps: total, num_images: request.num_images, model: MODEL.id };
 
   for (let step = 1; step <= total; step++) {

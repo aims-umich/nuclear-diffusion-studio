@@ -136,6 +136,7 @@ On Modal, a cold start never returns `503`: Modal holds the request until a cont
 
 These are ignored in proxy mode.
 
-- `X-ND-Mock-Scenario: ok | cold-start | inference-error | slow` forces a scenario for one request.
+- `X-ND-Mock-Scenario: ok | cold-start | waking | inference-error | slow` forces a scenario for one request.
+  `waking` holds back `accepted` for 30s (divided by `MOCK_SPEED`), the way Modal holds a request during a cold start; the UI explains the wait after 4s.
   In the UI, add `?mock=<scenario>` to the page URL.
 - `MOCK_COLD_START_RATE`, `MOCK_ERROR_RATE`, and `MOCK_SPEED` tune the mock's randomness and latency (see `frontend/.env.example`).
