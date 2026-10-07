@@ -14,7 +14,7 @@ const threads = (page: Page) => page.getByRole("navigation", { name: "Threads" }
 // Next.js renders its own role="alert" route announcer, so scope to the turn's error card.
 const errorCard = (page: Page) => page.getByRole("alert").filter({ has: page.getByRole("button", { name: "Retry" }) });
 
-const explore = (page: Page) => page.getByRole("heading", { name: /^Create nuclear.engineering images$/ });
+const explore = (page: Page) => page.getByRole("heading", { name: "Visualize nuclear energy concepts" });
 
 const isMobile = (page: Page) => (page.viewportSize()?.width ?? 1440) < 860;
 
@@ -112,7 +112,7 @@ test.describe("studio", () => {
     await page.goto("/");
     const panel = await settings(page);
     await panel.getByRole("radio", { name: "16:9, 1344 by 768, experimental" }).click();
-    await expect(panel.getByText("Experimental. nd-xl was fine-tuned on square images")).toBeVisible();
+    await expect(panel.getByText("Experimental. This model was fine-tuned on square images")).toBeVisible();
     await panel.getByRole("radio", { name: "3 images" }).click();
     await closeSettings(page);
     await fixSeed(page, "4294967294");
@@ -124,6 +124,34 @@ test.describe("studio", () => {
     await expect(results(page)).toHaveCount(3);
     await expect(results(page).first()).toHaveAttribute("width", "1344");
     await expect(page.getByText(/^seed \d+$/)).toHaveText(["seed 4294967294", "seed 4294967295", "seed 0"]);
+  });
+
+  test("opens the model card from run settings", async ({ page }) => {
+    await page.goto("/");
+    const panel = await settings(page);
+    const modelButton = panel.getByRole("button", { name: /^NuclearDiffusion SDXL/ });
+    await modelButton.click();
+
+    const models = page.getByRole("dialog", { name: "Models" });
+    const card = models.getByRole("listitem").filter({ hasText: "kumo24/sdxl_nuclear" });
+    await expect(card.getByRole("button", { name: "NuclearDiffusion SDXL" })).toHaveAttribute("aria-current", "true");
+    await expect(card.getByText("Released Jul 20, 2026 • Apache 2.0 license")).toBeVisible();
+    await expect(card.getByRole("link", { name: /^NuclearDiffusion paper/ })).toHaveAttribute("href", "https://arxiv.org/abs/2608.04030");
+    await expect(card.getByRole("link", { name: /^Open the model card/ })).toHaveAttribute(
+      "href",
+      "https://huggingface.co/kumo24/sdxl_nuclear",
+    );
+
+    // Escape closes only the model list; on a narrow screen the settings sheet stays open beneath it.
+    await page.keyboard.press("Escape");
+    await expect(models).toHaveCount(0);
+    await expect(modelButton).toBeFocused();
+    await expect(panel).toBeVisible();
+
+    // Picking the model in use just closes the list.
+    await modelButton.click();
+    await card.getByRole("button", { name: "NuclearDiffusion SDXL" }).click();
+    await expect(models).toHaveCount(0);
   });
 
   test("sends with Enter, adds lines with Shift+Enter, and needs a prompt", async ({ page }) => {
@@ -292,6 +320,17 @@ test.describe("studio", () => {
     await page.getByRole("button", { name: "Copy seed" }).click();
     await expect(page.getByText("Seed 99 copied")).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("99");
+  });
+
+  test("copies the model ID to the clipboard", async ({ page, context, browserName }) => {
+    test.skip(browserName !== "chromium", "Clipboard permissions are Chromium-only in Playwright");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/");
+    const panel = await settings(page);
+    await panel.getByRole("button", { name: /^NuclearDiffusion SDXL/ }).click();
+    await page.getByRole("dialog", { name: "Models" }).getByRole("button", { name: "Copy model ID" }).click();
+    await expect(page.getByText("Model ID copied")).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("kumo24/sdxl_nuclear");
   });
 
   test("never scrolls horizontally", async ({ page }) => {

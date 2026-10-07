@@ -270,7 +270,7 @@ function ErrorCard({ turn, busy, onRetry }: { turn: Turn; busy: boolean; onRetry
         <h3 className="text-[15px] font-semibold">{FAILURE_TITLES[failure.code] ?? "Generation failed"}</h3>
         <p className="mt-1.5 mb-3.5 max-w-[58ch] text-[13.5px] text-fg-muted">
           {coldStart
-            ? "The GPU was idle and is loading nd-xl. This usually takes about a minute."
+            ? "The GPU was idle and is loading the model. This usually takes about a minute."
             : failure.message}{" "}
           Your prompt and settings are kept, so you can retry as is.
         </p>

@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUpRight, Compass, PanelLeftClose, PanelLeftOpen, Plus, Trash2, X } from "lucide-react";
-import { MODEL } from "@/lib/contract";
+import { CURRENT_MODEL, PAPER_URL } from "@/lib/models";
 import { groupThreads, type Thread } from "@/lib/studio-state";
 import { cn } from "@/lib/utils";
 
@@ -118,14 +118,11 @@ export function Sidebar({
       </nav>
 
       <div className={cn("flex flex-none flex-col gap-2.5 border-t border-line py-4", collapsed ? "items-center" : "px-[18px]")}>
-        <div className="flex items-center gap-2.5 text-[12.5px]" title={collapsed ? `${MODEL.label}: ${status.label}` : undefined}>
+        <div className="flex items-center gap-2.5 text-[12.5px]" title={collapsed ? `${CURRENT_MODEL.name}: ${status.label}` : undefined}>
           <StatusDot tone={status.tone} />
           {!collapsed && (
             <>
-              <span className="font-mono">{MODEL.label}</span>
-              {mode === "mock" && (
-                <span className="rounded-[5px] border border-line-strong px-1.5 py-px text-[11px] text-fg-muted">Mock</span>
-              )}
+              <span className="min-w-0 truncate">{CURRENT_MODEL.name}</span>
               <span
                 data-testid="model-status"
                 className={cn(
@@ -139,9 +136,12 @@ export function Sidebar({
           )}
         </div>
         {!collapsed && (
-          <div className="flex gap-4 text-[12.5px]">
-            <ExternalLink href="https://arxiv.org/abs/2608.04030">Paper</ExternalLink>
-            <ExternalLink href={`https://huggingface.co/${MODEL.id}`}>Model card</ExternalLink>
+          <div className="flex items-center gap-4 text-[12.5px]">
+            <ExternalLink href={PAPER_URL}>Paper</ExternalLink>
+            <ExternalLink href={CURRENT_MODEL.cardUrl}>Model card</ExternalLink>
+            {mode === "mock" && (
+              <span className="ml-auto rounded-[5px] border border-line-strong px-1.5 py-px text-[11px] text-fg-muted">Mock</span>
+            )}
           </div>
         )}
       </div>

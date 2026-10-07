@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { EXAMPLE_CATEGORIES, EXAMPLES, type Example } from "@/lib/examples";
+import { PAPER_URL } from "@/lib/models";
 import { cn } from "@/lib/utils";
 
 const FILTERS = ["All", ...EXAMPLE_CATEGORIES] as const;
@@ -15,12 +16,22 @@ export function Explore({ onPick }: { onPick: (example: Example) => void }) {
   return (
     <section aria-labelledby="explore-heading" className="mx-auto max-w-[1040px] px-4 pt-8 pb-8 nav:px-8 nav:pt-14">
       <h1 id="explore-heading" className="text-2xl leading-tight font-medium tracking-[-0.02em] text-balance nav:text-[30px]">
-        {/* A non-breaking hyphen keeps "nuclear-engineering" on one line. */}
-        Create nuclear{"\u2011"}engineering images
+        Visualize nuclear energy concepts
       </h1>
-      <p className="mt-2.5 max-w-[60ch] text-[15px] text-fg-muted">
-        nd-xl is SDXL fine-tuned on reactor, fuel-cycle and plant imagery. Pick an example to load its prompt, or describe
-        your own below.
+      <p className="mt-2.5 max-w-[70ch] text-[15px] text-pretty text-fg-muted">
+        {/* Non-breaking hyphens keep "general-purpose" and "fine-tuned" whole. */}
+        General{"\u2011"}purpose image models often get reactors, fuel and radiation wrong. The models here are
+        fine{"\u2011"}tuned on 1,000 captioned nuclear energy images from the{" "}
+        <a
+          href={PAPER_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-fg-soft underline decoration-white/30 underline-offset-[3px] transition-colors hover:text-fg hover:decoration-fg"
+        >
+          NuclearDiffusion study
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+        . Pick an example to load its prompt, or describe your own below.
       </p>
 
       <div role="group" aria-label="Filter examples" className="mt-7 mb-[18px] flex flex-wrap gap-1.5">

@@ -12,11 +12,10 @@
  */
 import { z } from "zod";
 
+/** What the backend runs. Its display name and card live in lib/models.ts. */
 export const MODEL = {
   /** Hugging Face repo of the fine-tuned SDXL UNet. */
   id: "kumo24/sdxl_nuclear",
-  /** Short display name used throughout the UI. */
-  label: "nd-xl",
   /** The pipeline the UNet is loaded into. */
   base: "stabilityai/stable-diffusion-xl-base-1.0",
   precision: "fp16",

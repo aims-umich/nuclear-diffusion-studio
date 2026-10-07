@@ -1,12 +1,14 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ChevronDown, Dices, RotateCcw, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Dices, RotateCcw, X } from "lucide-react";
 import { RadioGroup, Switch } from "radix-ui";
 import { Slider } from "@/components/ui/slider";
 import { AspectGlyph } from "@/components/studio/composer";
+import { ModelPicker } from "@/components/studio/model-picker";
 import { IconButton, StatusDot, type ModelStatus } from "@/components/studio/sidebar";
 import { LIMITS, MODEL, SIZE_PRESETS, sizePresetById, type SizeId } from "@/lib/contract";
+import { CURRENT_MODEL } from "@/lib/models";
 import { exceedsPromptTokens } from "@/lib/prompt-tokens";
 import { randomSeed } from "@/lib/prng";
 import type { Settings } from "@/lib/studio-state";
@@ -49,25 +51,35 @@ export function SettingsPanel({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 pt-[18px] pb-7">
-        <div className="rounded-xl border border-line-strong bg-white/2 p-3.5">
-          <div className="flex items-center justify-between font-medium">
-            {MODEL.label}
-            <span
-              className={cn(
-                "flex items-center gap-[7px] text-xs font-normal",
-                status.tone === "active" ? "text-cherenkov-ink" : status.tone === "warn" ? "text-warn" : "text-fg-muted",
-              )}
+        <div>
+          <ModelPicker>
+            <button
+              type="button"
+              className="group w-full rounded-xl border border-line-strong bg-white/2 p-3.5 text-left transition-colors hover:border-white/28"
             >
-              <StatusDot tone={status.tone} />
-              {status.label}
-            </span>
-          </div>
-          <div className="mt-0.5 font-mono text-xs text-fg-subtle">{MODEL.id}</div>
-          <p className="mt-2 text-[12.5px] leading-normal text-fg-muted">
-            SDXL fine-tuned for nuclear-engineering imagery, from the NuclearDiffusion paper.
-          </p>
+              <span className="flex items-center gap-2 font-medium">
+                <span className="min-w-0 flex-1 truncate">{CURRENT_MODEL.name}</span>
+                <span
+                  className={cn(
+                    "flex items-center gap-[7px] text-xs font-normal",
+                    status.tone === "active" ? "text-cherenkov-ink" : status.tone === "warn" ? "text-warn" : "text-fg-muted",
+                  )}
+                >
+                  <StatusDot tone={status.tone} />
+                  {status.label}
+                </span>
+                <ChevronRight
+                  aria-hidden
+                  strokeWidth={1.5}
+                  className="-mr-1 size-4 flex-none text-fg-subtle transition-colors group-hover:text-fg"
+                />
+              </span>
+              <span className="mt-0.5 block font-mono text-xs text-fg-subtle">{CURRENT_MODEL.id}</span>
+              <span className="mt-2 block text-[12.5px] leading-normal text-fg-muted">{CURRENT_MODEL.summary}</span>
+            </button>
+          </ModelPicker>
           {mode === "mock" && (
-            <p className="mt-2 text-[12.5px] leading-normal text-fg-muted">
+            <p className="mt-2 px-0.5 text-[12.5px] leading-normal text-fg-muted">
               Mock engine: images are placeholders until the GPU service is connected.
             </p>
           )}
@@ -97,8 +109,8 @@ export function SettingsPanel({
           </RadioGroup.Root>
           <Hint>
             {size.trained
-              ? "The size nd-xl was fine-tuned on."
-              : "Experimental. nd-xl was fine-tuned on square images, so results at this size may be weaker."}
+              ? "The size this model was fine-tuned on."
+              : "Experimental. This model was fine-tuned on square images, so results at this size may be weaker."}
           </Hint>
         </div>
 

@@ -18,7 +18,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "NuclearDiffusion Studio",
   description:
-    "Generate nuclear-engineering imagery with the AIMS Lab's fine-tuned SDXL model (NuclearDiffusion).",
+    "Visualize nuclear energy concepts with image models fine-tuned by the AIMS Lab for the NuclearDiffusion study.",
 };
 
 export const viewport: Viewport = {
