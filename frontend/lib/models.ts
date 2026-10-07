@@ -36,7 +36,7 @@ export const MODELS: readonly ModelInfo[] = [
     summary: "SDXL fine\u2011tuned on nuclear energy imagery, from the NuclearDiffusion study.",
     // Non-breaking hyphens (\u2011) keep "fine-tuned" from splitting across lines.
     description:
-      "Stable Diffusion XL with its UNet fine\u2011tuned on nuclear energy imagery. Of the open models in the NuclearDiffusion study, fine\u2011tuning improved SDXL the most.",
+      "Stable Diffusion XL with its UNet fine\u2011tuned on nuclear energy imagery.",
     task: "Text to image • 1024×1024 • SDXL 1.0 base",
     trainingData: "1,000 captioned images of reactors, fuel cycles and radiation, from books, papers and news sites",
     limitations: "Can't write legible labels or text, and abstract diagrams come out weak",
