@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import io
+import os
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# Before diffusers is imported: importing it already logs transformers notices (e.g. torchvision being absent).
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 import torch
 from diffusers import StableDiffusionXLPipeline, UNet2DConditionModel
+from diffusers.utils import logging as diffusers_logging
+from transformers.utils import logging as transformers_logging
 
 from app.engine import GenerationCancelled, GenerationError, StepCallback
 from app.schemas import GenerateRequest, seed_for_image
@@ -17,12 +24,21 @@ if TYPE_CHECKING:
     from PIL.Image import Image
 
 
+# Keep container logs to what matters: no progress bars, and none of the expected notices about
+# loading fp16 weights on the CPU first or the pipeline upcasting the VAE for each decode.
+diffusers_logging.set_verbosity_error()
+diffusers_logging.disable_progress_bar()
+transformers_logging.set_verbosity_error()
+transformers_logging.disable_progress_bar()
+warnings.filterwarnings("ignore", message="`upcast_vae` is deprecated", category=FutureWarning)
+
+
 def load_pipeline(weights: Path, device: str) -> StableDiffusionXLPipeline:
-    unet = UNet2DConditionModel.from_pretrained(unet_dir(weights), torch_dtype=torch.float16)
+    unet = UNet2DConditionModel.from_pretrained(unet_dir(weights), dtype=torch.float16)
     pipe = StableDiffusionXLPipeline.from_pretrained(
         base_dir(weights),
         unet=unet,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         variant="fp16",
         use_safetensors=True,
     )

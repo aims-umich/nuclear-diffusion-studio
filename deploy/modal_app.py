@@ -21,9 +21,11 @@ import modal
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
 WEIGHTS = "/weights"
 
-# The cheapest per visit (deploy/benchmark.py, docs/IMPLEMENTATION_PLAN.md Section 11): the idle
+# L4 is the cheapest per visit (deploy/benchmark.py, docs/IMPLEMENTATION_PLAN.md Section 11): the idle
 # scale-down tail is billed at the GPU rate and outweighs the faster GPUs' lower cost per image.
-GPU = "L4"
+# Modal tries these in order, so when L4s are scarce a request gets an A10 (about the same cost per
+# visit) rather than waiting minutes for capacity.
+GPU = ["L4", "A10", "L40S"]
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -65,7 +67,11 @@ class Inference:
     @modal.enter(snap=False)
     def to_gpu(self) -> None:
         # Runs on every container start, after the snapshot is restored.
+        import torch
+
         self.engine.to("cuda")
+        # Which fallback GPU this container got, for reading cost and speed off the logs.
+        print(f"container ready on {torch.cuda.get_device_name()}")
 
     # Modal checks the proxy token at its edge, so a request without it never starts a GPU container.
     # The proxy sends it as `Authorization: Bearer <id>.<secret>`, which the app checks again.

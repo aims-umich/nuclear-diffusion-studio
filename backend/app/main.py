@@ -46,7 +46,8 @@ def create_app(engine: Engine, token: str | None = None, limiter: RateLimiter | 
             return _error(400, "ERR_INVALID_REQUEST", _describe(error))
 
         if limiter is not None:
-            retry_after = limiter.acquire(_client_ip(request), params.num_images)
+            # The store may be a network call (modal.Dict), so keep it off the event loop.
+            retry_after = await asyncio.to_thread(limiter.acquire, _client_ip(request), params.num_images)
             if retry_after is not None:
                 return _error(
                     429,

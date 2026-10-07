@@ -58,7 +58,7 @@ def download(root: Path) -> None:
         unet = UNet2DConditionModel.from_pretrained(
             MODEL_ID,
             revision=MODEL_REVISION,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             use_safetensors=True,
             cache_dir=cache,
         )
