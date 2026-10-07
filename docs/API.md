@@ -115,6 +115,8 @@ How the proxy maps upstream statuses to what the browser sees:
 | unreachable | `502` | `ERR_UPSTREAM` |
 | no response within 115s | `504` | `ERR_TIMEOUT` |
 
+The 115s timeout covers only the wait for the upstream to start responding; once the stream has started, it runs until its terminal event (up to the route's 300s limit).
+
 Return `503` with a `Retry-After` header while the model loads; the UI shows it as "The model is starting up" with a retry.
 
 The service in `backend/` answers:

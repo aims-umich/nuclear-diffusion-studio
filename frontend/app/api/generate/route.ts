@@ -14,9 +14,13 @@ import {
 import { clientIpFrom, proxyGenerate } from "@/lib/server/proxy";
 import { errorResponse, ndjsonResponse } from "@/lib/server/responses";
 
-/** Generous ceiling: a cold GPU container can take ~60s before the first step. */
-export const maxDuration = 120;
+/**
+ * The whole streamed response, which can be long: a batch of four 1024x1024
+ * images at 50 steps takes ~90s on the L4 the service runs on, after a cold start.
+ */
+export const maxDuration = 300;
 
+/** How long a cold start plus queueing may take before the upstream starts responding. */
 const UPSTREAM_TIMEOUT_MS = 115_000;
 
 /**

@@ -29,6 +29,10 @@ export type ProxyOptions = {
   token?: string;
   /** The browser's IP, forwarded so the backend can rate-limit per visitor rather than per proxy. */
   clientIp?: string;
+  /**
+   * How long to wait for the upstream to start responding (cold start plus queueing).
+   * A stream that has started is not cut off by it.
+   */
   timeoutMs: number;
   signal: AbortSignal;
   fetchImpl?: typeof fetch;
@@ -44,8 +48,10 @@ const SyncResultSchema = z.object({
 
 export async function proxyGenerate(request: GenerateRequest, options: ProxyOptions): Promise<Response> {
   const { baseUrl, token, clientIp, timeoutMs, signal, fetchImpl = fetch } = options;
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const combined = AbortSignal.any([signal, timeout]);
+  // Not AbortSignal.timeout(): fetch keeps the signal for the body too, so it would end a stream mid-generation.
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), timeoutMs);
+  const combined = AbortSignal.any([signal, timeout.signal]);
 
   let upstream: Response;
   try {
@@ -62,12 +68,14 @@ export async function proxyGenerate(request: GenerateRequest, options: ProxyOpti
       cache: "no-store",
     });
   } catch (error) {
-    if (timeout.aborted) {
+    if (timeout.signal.aborted) {
       return errorResponse(504, ERROR_CODES.timeout, "The inference service took too long to respond. Try again.");
     }
     if (signal.aborted) return new Response(null, { status: 499 });
     console.error("[generate] upstream unreachable", error);
     return errorResponse(502, ERROR_CODES.upstream, "Can't reach the inference service right now. Try again shortly.");
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!upstream.ok) return mapUpstreamError(upstream);
