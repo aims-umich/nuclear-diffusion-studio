@@ -64,7 +64,8 @@ Status `200`, `Content-Type: application/x-ndjson`, one JSON object per line:
 {"type":"result","images":[{"image":"data:image/png;base64,...","seed":742199304},{"image":"data:image/png;base64,...","seed":742199305}],"params":{"prompt":"...","num_inference_steps":50,"guidance_scale":5,"width":1024,"height":1024,"num_images":2,"scheduler":"euler","prompt_truncated":false,"negative_prompt_truncated":false},"timing_ms":14100,"model":"kumo24/sdxl_nuclear"}
 ```
 
-- `accepted.seed` is the base seed actually used. Image `i` of a batch uses `(seed + i) mod 2^32`, and each entry in `images` carries its own seed, so any single image can be reproduced exactly with `num_images: 1`.
+- `accepted.seed` is the base seed actually used. Image `i` of a batch uses `(seed + i) mod 2^32`, and each entry in `images` carries its own seed, so any single image can be reproduced with `num_images: 1`.
+  The same request repeated gives byte-identical images, but rerunning one image of a batch on its own gives the same picture with slight pixel noise (about 1.5% mean difference), because the GPU computes a batch of 2-4 with different kernels than a single image.
 - `images` is in batch order and has exactly `num_images` entries. Each `image` is a `data:` URL (PNG from the model) or an `https` URL if a storage layer is added later.
 - `params` echoes the applied parameters plus `scheduler`, the diffusers scheduler that ran (`euler`).
 - `prompt_truncated` / `negative_prompt_truncated` are `true` when that text ran past the 75-token window and its tail was ignored.
