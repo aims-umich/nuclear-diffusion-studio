@@ -36,6 +36,20 @@ describe("readNdjson", () => {
     expect(await collect(streamOf([bytes.slice(0, cut), bytes.slice(cut)]))).toEqual([{ prompt: "1024²" }]);
   });
 
+  it("reads a multi-megabyte line arriving in small chunks in linear time", async () => {
+    // A batch of four real images is one ~8 MB result line; network chunks are often a few KB.
+    const image = "data:image/png;base64," + "A".repeat(2_000_000);
+    const text = JSON.stringify({ images: [image, image, image, image] }) + '\n{"next":true}\n';
+    const chunks = Array.from({ length: Math.ceil(text.length / 2048) }, (_, i) => text.slice(i * 2048, (i + 1) * 2048));
+
+    const started = performance.now();
+    const values = await collect(streamOf(chunks));
+
+    expect(values).toEqual([{ images: [image, image, image, image] }, { next: true }]);
+    // Rescanning the whole buffer per chunk took ~7s here; linear reading takes well under 100ms.
+    expect(performance.now() - started).toBeLessThan(1500);
+  });
+
   it("throws on malformed JSON", async () => {
     await expect(collect(streamOf(["{nope}\n"]))).rejects.toThrow(SyntaxError);
   });
