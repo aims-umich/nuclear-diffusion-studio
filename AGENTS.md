@@ -41,6 +41,7 @@ Run from `frontend/`:
   `INFERENCE_API_TOKEN` lives only in gitignored `frontend/.env.local` (mode 600), the Modal secret `nuclear-diffusion-studio`, and later Vercel env vars marked Sensitive.
   Create or rotate Modal secrets with `modal secret create --from-json <temp file>` and delete the temp file after; check values by comparing hashes, never by displaying them.
   The backend compares tokens in constant time and never logs the `Authorization` header.
+- Serverless only. The GPU never runs 24/7: `min_containers` stays 0 (even for demos), and the Modal workspace budget ($30) and spend limit ($0) are the hard cost ceiling. Do not raise either without asking.
 - The contract is frozen. Change `lib/contract.ts`, `docs/API.md`, the mock, and the proxy together, or not at all.
 - Offer only settings the model supports. It is a fine-tuned SDXL UNet in the stock SDXL pipeline; `docs/API.md` ("What the model supports") lists the limits and why. Check the model card before adding a knob.
 - The mock must stay faithful to the contract: every UI state has to be reachable without a backend.

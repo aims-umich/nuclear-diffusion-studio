@@ -205,7 +205,7 @@ If hosting ever changes (for example to Jetstream2), the same package runs under
     secrets=[modal.Secret.from_name("nuclear-diffusion-studio")],  # INFERENCE_API_TOKEN
     enable_memory_snapshot=True,
     scaledown_window=180,             # seconds idle before scale-to-zero; covers a user iterating on prompts
-    min_containers=0,                 # raise temporarily for a live demo or talk
+    min_containers=0,                 # always 0: serverless only, never a warm GPU
     max_containers=2,                 # cost ceiling; excess requests queue at Modal
     timeout=300,
 )
@@ -286,7 +286,7 @@ Non-2xx responses carry `{"error":{"code","message","retry_after_s?"}}`; a warmi
 - Rate-limit by IP (the GPU is the scarce resource).
   The backend only sees Vercel's IP, so the proxy forwards the client IP in `X-Forwarded-For` and the backend keys its limiter on that, stored in a `modal.Dict` so the limit holds across containers.
   Forwarding the header is a contract change: update `lib/contract.ts`, `docs/API.md`, the mock, and the proxy together.
-- Hard cost ceiling: a **Modal workspace budget** stops billable work once the monthly limit is hit, and `max_containers` bounds the burn rate below it.
+- Hard cost ceiling: the **Modal workspace budget** ($30, equal to the Starter credit) stops billable work once the monthly limit is hit, a **spend limit** of $0 blocks any out-of-pocket charge, and `max_containers` bounds the burn rate below both.
 - Cap prompt length and reject empty prompts.
 - Optionally run a lightweight NSFW/safety check on outputs before returning; note it's a research/domain model, so scope this to your risk tolerance.
 
@@ -444,7 +444,7 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 
 **Phase 5 - Modal setup & model validation (half a day)**
 
-- Create the Modal workspace on the Starter plan, set a **workspace budget** (start at $30/month so the free credit is the ceiling), and create the `nuclear-diffusion-studio` secret with a generated `INFERENCE_API_TOKEN`.
+- Create the Modal workspace on the Starter plan, set a **workspace budget** of $30/month and a **spend limit** of $0 so the free credit is the ceiling (done 2026-10-07), and create the `nuclear-diffusion-studio` secret with a generated `INFERENCE_API_TOKEN`.
 - Ask the PI to apply to **Modal for Academics** (up to $10k in credits; faculty, postdocs, and PhD students are eligible), so traffic growth never blocks on budget.
 - `modal run` the load+generate snippet (Section 2) and confirm image quality; capture 6-10 strong example prompts and good default params (these seed the example chips).
 - Benchmark L4, A10, and L40S: seconds per image at 1024 and 50 steps (and a batch of 4), cold-start time with snapshots, and cost per image. Keep the cheapest GPU whose warm single-image latency stays under about 15s.
@@ -483,7 +483,7 @@ Phases 0-4 need no GPU, no Python, and no model access; phases 5-7 wire in the r
 
 - **Frontend:** Next.js on Vercel (same as `aims-website`). Ships first with the mock route handler active, so there is a live link before any backend exists.
 - **The flip:** setting `INFERENCE_API_URL` switches the `/api/generate` route handler from mock to proxy - the one config change that turns the demo real. Unset, it serves the mock.
-- **Backend:** a Modal app (`modal deploy deploy/modal_app.py`), scale-to-zero with `max_containers` as the burn-rate cap. Raise `min_containers` to 1 only for a live demo or talk, then set it back.
+- **Backend:** a Modal app (`modal deploy deploy/modal_app.py`), scale-to-zero with `max_containers` as the burn-rate cap. `min_containers` stays 0, even for live demos: the GPU never runs unless a request is being served or the scale-down window is open.
 - **Secrets:** none in the client. `INFERENCE_API_TOKEN` lives in Vercel (sent by the proxy) and in the Modal secret (checked by the backend); rotate both together.
 - **Access:** the backend accepts only bearer-authenticated server-to-server calls from the proxy, so no CORS configuration is needed.
 - **Monitoring:** Modal's dashboard for per-container logs, GPU seconds, and spend; log generation timings and failures in the backend; watch cold-start frequency against the scale-down window.
@@ -500,7 +500,7 @@ Modal list prices (September 2026): L4 $0.000222/s, A10 $0.000306/s, L40S $0.000
 | One visit (cold start + a few images + 180s scale-down tail) | $0.05-0.10 |
 | Idle day | $0 |
 | Starter plan free compute | $30/month, roughly 300-600 visits |
-| One container kept warm 24/7 (A10) | about $800/month - avoid outside live demos |
+| One container kept warm 24/7 (A10) | about $800/month - never done (decided 2026-10-07) |
 
 - **Levers, in order of impact:** the scale-down window (idle tail billed at the GPU rate), cold-start time (snapshots), then GPU choice.
 - **If traffic outgrows the free tier:** Modal for Academics credits first; if usage becomes steady enough that always-on is cheaper, move the same `backend/` package to a free **Jetstream2** GPU VM through an NSF ACCESS Explore allocation (1-page proposal, faculty or grad-student PI) and point `INFERENCE_API_URL` at it.
