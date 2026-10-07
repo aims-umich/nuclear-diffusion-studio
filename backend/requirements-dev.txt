@@ -1,3 +1,8 @@
-# Local tooling only: the Modal CLI/client that builds and deploys the GPU service.
-# The inference runtime (torch, diffusers) is installed inside the Modal image, not locally.
-modal==1.5.5
+# Local tooling only: the Modal CLI/client that builds and deploys the GPU service,
+# plus what the CPU-only test suite needs. No torch on laptops: the tests use a fake engine.
+modal==1.6.1
+fastapi==0.142.2
+pydantic==2.13.5
+httpx2==2.13.1
+pytest==9.1.1
+uv==0.12.23
