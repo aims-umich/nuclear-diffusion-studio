@@ -51,15 +51,16 @@ export function Explore({ onPick }: { onPick: (example: Example) => void }) {
         ))}
       </div>
 
-      <ul className="grid grid-cols-2 gap-3 nav:grid-cols-[repeat(auto-fill,minmax(172px,1fr))]">
+      {/* Three columns divide the six examples evenly; a row of five would leave one on its own. */}
+      <ul className="grid grid-cols-2 gap-3 nav:max-w-[720px] nav:grid-cols-3">
         {examples.map((example) => (
           <li key={example.title}>
             <button
               type="button"
               onClick={() => onPick(example)}
-              className="group relative block aspect-4/5 w-full overflow-hidden rounded-[14px] border border-line bg-hatch text-left transition-colors hover:border-white/30"
+              className="group relative block aspect-square w-full overflow-hidden rounded-[14px] border border-line bg-hatch text-left transition-colors hover:border-white/30"
             >
-              <Image src={example.thumbnail} alt="" fill unoptimized className="object-cover" sizes="240px" />
+              <Image src={example.thumbnail} alt="" fill unoptimized className="object-cover" sizes="(min-width: 860px) 240px, 50vw" />
               <span className="absolute inset-x-0 bottom-0 flex flex-col bg-linear-to-t from-black/90 to-transparent px-3.5 pt-11 pb-3.5">
                 <span className="text-sm leading-snug font-medium text-fg">{example.title}</span>
                 <span className="mt-0.5 text-xs text-fg-muted">{example.category}</span>

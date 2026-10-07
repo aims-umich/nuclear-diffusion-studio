@@ -6,11 +6,12 @@ import type { SizeId } from "@/lib/contract";
  *
  * Each prompt was checked against the real model (Phase 5, 2026-10-07), and its
  * thumbnail is that render at 1024x1024, 50 steps, guidance 5.0, with `seed`.
- * The fine-tune draws equipment, buildings and materials well; abstract
- * diagrams (a fission chain, neutron paths) and hyperbolic cooling towers came
- * out weak, so they are not offered.
+ * The fine-tune draws equipment and materials well; abstract diagrams (a
+ * fission chain, neutron paths) and hyperbolic cooling towers came out weak, so
+ * they are not offered. Plant exteriors and facility interiors render, but are
+ * not what the model is for, so they are left out too.
  */
-export const EXAMPLE_CATEGORIES = ["Reactor systems", "Fuel cycle", "Facilities", "Physics"] as const;
+export const EXAMPLE_CATEGORIES = ["Reactor systems", "Fuel cycle", "Physics"] as const;
 export type ExampleCategory = (typeof EXAMPLE_CATEGORIES)[number];
 
 export type Example = {
@@ -42,14 +43,6 @@ export const EXAMPLES: readonly Example[] = [
     seed: 2000,
   },
   {
-    title: "Containment dome at dusk",
-    category: "Facilities",
-    prompt: "Nuclear power plant containment dome at dusk, long exposure photograph",
-    sizeId: "1:1",
-    thumbnail: "/examples/containment-dome-at-dusk.jpg",
-    seed: 1002,
-  },
-  {
     title: "Spent fuel pool",
     category: "Fuel cycle",
     prompt: "Spent fuel pool from above, deep blue Cherenkov glow around the fuel racks",
@@ -72,14 +65,6 @@ export const EXAMPLES: readonly Example[] = [
     sizeId: "1:1",
     thumbnail: "/examples/triso-fuel-particle.jpg",
     seed: 1005,
-  },
-  {
-    title: "Tokamak vacuum vessel",
-    category: "Facilities",
-    prompt: "Interior of a tokamak fusion reactor vacuum vessel, photograph",
-    sizeId: "1:1",
-    thumbnail: "/examples/tokamak-vacuum-vessel.jpg",
-    seed: 3001,
   },
   {
     title: "ZETA fusion experiment",
