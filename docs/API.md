@@ -46,6 +46,7 @@ Allowed sizes (all SDXL-native, sides divisible by 64):
 
 Unknown fields and any other size are rejected with `400 ERR_INVALID_REQUEST`.
 The proxy sends `Authorization: Bearer $INFERENCE_API_TOKEN` when that variable is set.
+It also sends `X-Forwarded-For` with the browser's IP (the first entry of the header the host set), so the service can rate-limit per visitor; it is omitted when the host reports no client IP.
 
 ## Successful response: an NDJSON stream
 
@@ -110,11 +111,19 @@ How the proxy maps upstream statuses to what the browser sees:
 | `503` (warming, scaling from zero) | `503` + `Retry-After` | `ERR_COLD_START` |
 | `429` | `429` | `ERR_RATE_LIMITED` |
 | `400` / `422` | `400` (upstream `message` passed through) | `ERR_INVALID_REQUEST` |
-| other `5xx` | `502` | `ERR_UPSTREAM` |
+| other statuses (`401`, `5xx`, ...) | `502` | `ERR_UPSTREAM` |
 | unreachable | `502` | `ERR_UPSTREAM` |
 | no response within 115s | `504` | `ERR_TIMEOUT` |
 
 Return `503` with a `Retry-After` header while the model loads; the UI shows it as "The model is starting up" with a retry.
+
+The service in `backend/` answers:
+
+- `401 ERR_UNAUTHORIZED` when it is configured with a token and the request does not carry it.
+- `429 ERR_RATE_LIMITED` with `Retry-After` when a client (keyed on `X-Forwarded-For`) exceeds its image budget, 40 images per rolling hour on Modal.
+- `400 ERR_INVALID_REQUEST` for anything outside the request rules above.
+
+On Modal, a cold start never returns `503`: Modal holds the request until a container is up, so it shows up as a longer wait before `accepted`.
 
 ## Streaming notes
 

@@ -117,6 +117,18 @@ describe("POST /api/generate (proxy mode)", () => {
     expect((await events(response)).map((event) => event.type)).toEqual(["accepted", "progress", "result"]);
   });
 
+  it("forwards the browser's IP so the backend can rate-limit per visitor", async () => {
+    const upstream = vi.fn<typeof fetch>().mockResolvedValue(Response.json(upstreamResult));
+    vi.stubGlobal("fetch", upstream);
+
+    await POST(post({ prompt: "dome" }, { "x-forwarded-for": "203.0.113.7, 10.0.0.1" }));
+    await POST(post({ prompt: "dome" }));
+
+    const headers = upstream.mock.calls.map(([, init]) => init?.headers as Record<string, string>);
+    expect(headers[0]["X-Forwarded-For"]).toBe("203.0.113.7");
+    expect(headers[1]).not.toHaveProperty("X-Forwarded-For");
+  });
+
   it("normalises a synchronous JSON response into the stream contract", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(Response.json(upstreamResult)));
     const stream = await events(await POST(post({ prompt: "dome" })));

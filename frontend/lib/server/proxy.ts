@@ -27,6 +27,8 @@ import { errorResponse, ndjsonResponse } from "@/lib/server/responses";
 export type ProxyOptions = {
   baseUrl: string;
   token?: string;
+  /** The browser's IP, forwarded so the backend can rate-limit per visitor rather than per proxy. */
+  clientIp?: string;
   timeoutMs: number;
   signal: AbortSignal;
   fetchImpl?: typeof fetch;
@@ -41,7 +43,7 @@ const SyncResultSchema = z.object({
 });
 
 export async function proxyGenerate(request: GenerateRequest, options: ProxyOptions): Promise<Response> {
-  const { baseUrl, token, timeoutMs, signal, fetchImpl = fetch } = options;
+  const { baseUrl, token, clientIp, timeoutMs, signal, fetchImpl = fetch } = options;
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = AbortSignal.any([signal, timeout]);
 
@@ -53,6 +55,7 @@ export async function proxyGenerate(request: GenerateRequest, options: ProxyOpti
         "Content-Type": "application/json",
         Accept: `${NDJSON_CONTENT_TYPE}, application/json`,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(clientIp ? { "X-Forwarded-For": clientIp } : {}),
       },
       body: JSON.stringify(request),
       signal: combined,
@@ -86,6 +89,16 @@ export async function proxyGenerate(request: GenerateRequest, options: ProxyOpti
     return errorResponse(502, ERROR_CODES.upstream, "The inference service returned an unexpected response.");
   }
   return ndjsonResponse(syncToEvents(parsed.data), signal);
+}
+
+/**
+ * The browser's IP as the hosting platform reports it. Vercel sets
+ * `x-forwarded-for` itself (overwriting any client-sent value); its first entry
+ * is the original client.
+ */
+export function clientIpFrom(headers: Headers): string | undefined {
+  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || headers.get("x-real-ip")?.trim() || undefined;
 }
 
 async function mapUpstreamError(upstream: Response): Promise<Response> {

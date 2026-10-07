@@ -11,7 +11,7 @@ import {
   pickScenario,
   runMockGeneration,
 } from "@/lib/mock/engine";
-import { proxyGenerate } from "@/lib/server/proxy";
+import { clientIpFrom, proxyGenerate } from "@/lib/server/proxy";
 import { errorResponse, ndjsonResponse } from "@/lib/server/responses";
 
 /** Generous ceiling: a cold GPU container can take ~60s before the first step. */
@@ -44,6 +44,7 @@ export async function POST(request: Request): Promise<Response> {
     return proxyGenerate(parsed.data, {
       baseUrl: upstreamUrl,
       token: process.env.INFERENCE_API_TOKEN,
+      clientIp: clientIpFrom(request.headers),
       timeoutMs: UPSTREAM_TIMEOUT_MS,
       signal: request.signal,
     });
